@@ -84,13 +84,9 @@ async function prepareStreamScripts() {
   if (process.env.NODE_ENV !== "production") {
     let rebuild = Promise.resolve();
     for (const [directory, files, generate] of [
+      ["apps/scope/src/features/devices", ["device-stream.browser.ts"], generateDeviceStreamScript],
       [
-        "apps/mobile/src/features/devices",
-        ["device-stream.browser.ts"],
-        generateDeviceStreamScript,
-      ],
-      [
-        "apps/mobile/src/features/browser",
+        "apps/scope/src/features/browser",
         ["preview-stream.browser.ts"],
         generatePreviewStreamScript,
       ],

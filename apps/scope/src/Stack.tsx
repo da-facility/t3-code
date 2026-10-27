@@ -1,4 +1,5 @@
 import { isDraftThreadRoute } from "./features/threads/thread-route-state";
+import { FleetScreen } from "./features/fleet/FleetScreen";
 import { ComponentCatalogScreen } from "./features/development/ComponentCatalogScreen";
 import { PullRequestGuideStopScreen } from "./features/pull-requests/guide/PullRequestGuideScreen";
 import { PullRequestInlineCommentScreen } from "./features/pull-requests/PullRequestInlineCommentScreen";
@@ -599,7 +600,8 @@ function NotFoundScreen() {
 }
 
 const RootStackConfig = createWorkspaceStackNavigator({
-  initialRouteName: "Home",
+  // Scope opens on the fleet; the T3 workspace is one tap away.
+  initialRouteName: "Fleet",
   UNSTABLE_router: workspaceDetailRouter,
   // React Navigation calls layouts inline; compiled components would share the navigator's memo cache.
   layout: (props) => <RootStackLayout {...props} />,
@@ -616,6 +618,11 @@ const RootStackConfig = createWorkspaceStackNavigator({
           }),
         }
       : {}),
+    Fleet: createNativeStackScreen({
+      screen: FleetScreen,
+      linking: "fleet",
+      options: { headerShown: false },
+    }),
     Home: createNativeStackScreen({
       screen: WorkspaceRootScreen,
       linking: "",

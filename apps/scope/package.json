@@ -1,5 +1,5 @@
 {
-  "name": "@t3tools/mobile",
+  "name": "@t3tools/scope",
   "version": "0.0.0",
   "private": true,
   "main": "index.ts",

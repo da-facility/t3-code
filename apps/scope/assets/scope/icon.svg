@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1A2350"/>
+      <stop offset="1" stop-color="#060814"/>
+    </linearGradient>
+    <radialGradient id="sweep" cx="512" cy="512" r="300" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5EE6FF" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#5EE6FF" stop-opacity="0.55"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FFC861" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#FFC861" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <!-- sweep wedge: from 12 o'clock clockwise 70 degrees -->
+  <path d="M512 512 L512 212 A300 300 0 0 1 793.9 409.4 Z" fill="url(#sweep)"/>
+  <circle cx="512" cy="512" r="318" fill="none" stroke="#F3F5FF" stroke-width="88"/>
+  <circle cx="512" cy="512" r="34" fill="#F3F5FF"/>
+  <circle cx="660" cy="340" r="120" fill="url(#glow)"/>
+  <circle cx="660" cy="340" r="58" fill="#FFB23E"/>
+</svg>
