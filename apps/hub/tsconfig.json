@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        // The hub is plain Node so it runs straight from source with no runtime dependencies.
+        "diagnosticSeverity": {
+          "nodeBuiltinImport": "off",
+          "globalDate": "off",
+          "globalConsole": "off",
+          "globalTimers": "off",
+          "globalFetch": "off",
+          "globalRandom": "off",
+          "preferSchemaOverJson": "off"
+        }
+      }
+    ]
+  },
+  "include": ["src", "scripts"]
+}

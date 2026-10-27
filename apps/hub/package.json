@@ -1,0 +1,21 @@
+{
+  "name": "@t3tools/hub",
+  "private": true,
+  "bin": {
+    "fleet-hub": "./src/main.ts"
+  },
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vp test run --config ../../vite.config.ts --dir .",
+    "build": "node scripts/build.ts"
+  },
+  "dependencies": {
+    "@t3tools/fleet": "workspace:*"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@types/node": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

@@ -21,7 +21,7 @@ ips=$(printf '%s\n' "$added" | command grep -oE '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b
 
 emails=$(printf '%s\n' "$added" | command grep -oiE '[a-z0-9._%+-]+@[a-z][a-z0-9-]*(\.[a-z0-9-]+)*\.[a-z]{2,}\b' | sort -u |
   command grep -viE '\.(plist|json|ya?ml|ts|tsx|js|mjs|md|service|toml|lock|sh)$' |
-  command grep -viE '@(example\.(com|org|net)|users\.noreply\.github\.com|anthropic\.com|t3\.codes|ping\.gg|localhost)$' |
+  command grep -viE '@(([a-z0-9-]+\.)*example\.(com|org|net|ts\.net)|users\.noreply\.github\.com|anthropic\.com|t3\.codes|ping\.gg|localhost)$' |
   command grep -viE '^(noreply|git|me|you|user|test|foo|bar)@' || true)
 [ -n "$emails" ] && report "email address" "$emails"
 

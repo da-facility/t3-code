@@ -7,9 +7,13 @@
       "types": "./src/registry.ts",
       "import": "./src/registry.ts"
     },
-    "./hubApi": {
-      "types": "./src/hubApi.ts",
-      "import": "./src/hubApi.ts"
+    "./importers": {
+      "types": "./src/importers.ts",
+      "import": "./src/importers.ts"
+    },
+    "./scan": {
+      "types": "./src/scan.ts",
+      "import": "./src/scan.ts"
     }
   },
   "scripts": {
