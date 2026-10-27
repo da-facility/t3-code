@@ -1,15 +1,7 @@
 #!/usr/bin/env node
-// A stand-in for the 1Password `op` CLI, for testing the hub's vault without a
-// real account. It mimics the parts the hub uses:
-//   op account add --address A --email E --secret-key K   (reads the password on stdin)
-//   op signin --raw [--account A]                          (password on stdin -> session token)
-//   op signout [--account A] [--forget]
-//   op whoami --session T
-//   op item list --categories Login --format json --session T
-//   op item get <id> --format json --reveal --session T
-// Sessions expire after 30 minutes without use, like op's idle limit.
-// State: $OP_STUB_HOME/state.json (default ~/.op-stub). Seed items with
-//   OP_STUB_HOME=... op-stub.mjs __seed '[{"title":"Example","url":"https://example.com","username":"u","password":"p"}]'
+// Stand-in for the 1Password `op` CLI (account add, signin --raw, signout, whoami, item list/get)
+// with op's 30-minute idle session expiry. State: $OP_STUB_HOME/state.json (default ~/.op-stub).
+// Seed logins: op-stub.mjs __seed '[{"title":"Example","url":"https://example.com","username":"u","password":"p"}]'
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";

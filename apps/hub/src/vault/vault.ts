@@ -373,14 +373,16 @@ export class Vault {
 
   private startWatchdog() {
     if (this.watchdog) return;
-    this.watchdog = setInterval(() => this.checkHeartbeat(), 1_000);
+    this.watchdog = setInterval(() => void this.checkHeartbeat(), 1_000);
     this.watchdog.unref();
   }
 
   /** Locks when the phone's approval screen stopped sending heartbeats. Exposed for tests. */
-  checkHeartbeat() {
-    if (this.session && this.now() > this.session.heartbeatDeadline)
-      void this.lock("heartbeat missed");
+  checkHeartbeat(): Promise<void> {
+    if (this.session && this.now() > this.session.heartbeatDeadline) {
+      return this.lock("heartbeat missed");
+    }
+    return Promise.resolve();
   }
 
   async lock(_reason: string) {

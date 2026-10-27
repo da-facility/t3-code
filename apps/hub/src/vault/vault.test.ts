@@ -153,13 +153,11 @@ describe("vault", () => {
     h.advance(20_000);
     expect(h.vault.heartbeat(phone.id)).toBe(true);
     h.advance(20_000);
-    h.vault.checkHeartbeat();
+    await h.vault.checkHeartbeat();
     expect(h.vault.status().unlocked).toBe(true);
     h.advance(31_000);
-    h.vault.checkHeartbeat();
-    await Promise.resolve();
+    await h.vault.checkHeartbeat();
     expect(h.vault.status().unlocked).toBe(false);
-    await new Promise((resolve) => setTimeout(resolve, 300));
     expect(h.sessions()).toBe(0);
     // The account stays added: the next sign-in is not a new device.
     expect(h.stub(["signin", "--raw", "--account", "my"], PASSWORD).trim().length).toBeGreaterThan(
