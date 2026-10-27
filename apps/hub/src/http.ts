@@ -17,6 +17,14 @@ export interface HubHttpOptions {
   push: PushFn | null;
   /** Extra routes (the vault) mounted under /api. Returns false when it did not handle the request. */
   extraRoutes?: (context: RouteContext) => Promise<boolean>;
+  /** Answers a credential request from a fleet host (the browser fill); null when refused. */
+  requestCredential?: (
+    url: string,
+    requester: string,
+  ) => Promise<{ username: string | null; password: string | null; title: string } | null>;
+  onDeviceRevoked?: (deviceId: string) => void;
+  /** Loopback-only operator routes for the hub CLI (vault lock, test requests). */
+  adminRoutes?: (path: string, body: unknown) => Promise<unknown>;
 }
 
 export interface RouteContext {
@@ -128,6 +136,7 @@ export function createHubServer(options: HubHttpOptions) {
       if (target.role === "owner" && me.role !== "owner")
         throw new HttpError(403, "Only the owner can revoke the owner.");
       db.revokeDevice(target.id);
+      options.onDeviceRevoked?.(target.id);
       return send(200, { device: publicDevice(db.getDevice(target.id)!) });
     }
 
@@ -233,6 +242,30 @@ export function createHubServer(options: HubHttpOptions) {
         if (method !== "POST") return send(405, { error: "Method not allowed" });
         const result = await handleFleetMcp(fleet, await readBody(request));
         return send(result.status, result.body, result.headers);
+      }
+
+      if (url.pathname.startsWith("/admin/") && method === "POST") {
+        const remote = request.socket.remoteAddress ?? "";
+        if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(remote) || !options.adminRoutes) {
+          return send(404, { error: "Not found" });
+        }
+        return send(200, await options.adminRoutes(url.pathname, await readBody(request)));
+      }
+
+      if (url.pathname === "/credentials" && method === "POST") {
+        const token = bearer(request);
+        const caller = token ? db.verifyToken(token) : null;
+        if (!caller) return send(401, { error: "A fleet token is required." });
+        if (!options.requestCredential) return send(503, { error: "The vault is not available." });
+        const body = (await readBody(request)) as { url?: unknown };
+        if (typeof body.url !== "string") return send(400, { error: "Expected url." });
+        const credential = await options.requestCredential(
+          body.url,
+          caller.serverId ?? caller.label,
+        );
+        return credential
+          ? send(200, credential)
+          : send(403, { error: "Not approved on the phone." });
       }
 
       if (url.pathname.startsWith("/api/")) {

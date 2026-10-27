@@ -476,6 +476,10 @@ export class HubDb {
     );
   }
 
+  setDevicePublicKey(id: string, publicKey: string) {
+    this.db.prepare("UPDATE devices SET public_key = ? WHERE id = ?").run(publicKey, id);
+  }
+
   setPushToken(id: string, apnsToken: string | null, apnsEnv: string | null) {
     this.db
       .prepare("UPDATE devices SET apns_token = ?, apns_env = ? WHERE id = ?")

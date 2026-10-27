@@ -11,6 +11,9 @@ import { HubDb } from "./db.ts";
 import { Fleet } from "./fleet.ts";
 import { createHubServer } from "./http.ts";
 import { scanServer } from "./scanner.ts";
+import { OpCli } from "./vault/op.ts";
+import { vaultRoutes } from "./vault/routes.ts";
+import { Vault } from "./vault/vault.ts";
 import { Watcher, type PushFn } from "./watcher.ts";
 
 const USAGE = `fleet-hub <command>
@@ -29,8 +32,13 @@ const USAGE = `fleet-hub <command>
   device list | device approve <id> | device revoke <id>
   overview [--json]                       Threads and pending requests across linked servers
   call <server> <tool> [json-args]        Call a T3 tool on a linked server
+  vault setup [--account A]               Store the 1Password master password (read from stdin)
+  vault status | vault lock | vault reset
+  vault recover                           Re-wrap the vault key for enrolled phones (code on stdin)
+  vault request <url>                     Ask the phone to approve a credential (testing)
 
-Environment: FLEET_HUB_HOME (default /var/lib/fleet-hub), FLEET_HUB_HOST, FLEET_HUB_PORT (8780).
+Environment: FLEET_HUB_HOME (default /var/lib/fleet-hub), FLEET_HUB_HOST, FLEET_HUB_PORT (8780),
+FLEET_HUB_OP_BIN (default op), FLEET_HUB_OP_ACCOUNT (op account shorthand).
 APNs: put {"keyPath","keyId","teamId","topic"} in $FLEET_HUB_HOME/apns.json.`;
 
 const home = process.env.FLEET_HUB_HOME ?? "/var/lib/fleet-hub";
@@ -79,6 +87,39 @@ function loadPush(): PushFn | null {
     (environment === "production" ? senders.production : senders.sandbox).send(token, message);
 }
 
+function makeVault(
+  db: HubDb,
+  push: PushFn | null,
+  account: string | null = process.env.FLEET_HUB_OP_ACCOUNT ?? null,
+) {
+  return new Vault(db, new OpCli(process.env.FLEET_HUB_OP_BIN ?? "op", account), {
+    notify: (request, locked) => {
+      if (!push) return;
+      for (const device of db.listDevices()) {
+        if (device.status !== "approved" || !device.apnsToken) continue;
+        void push(device.apnsToken, device.apnsEnv, {
+          title: locked ? "Unlock to sign in" : "Approve sign-in",
+          body: `${request.requester} wants your login for ${new URL(request.url).host}`,
+          timeSensitive: true,
+          data: { kind: "credential", requestId: request.id },
+        });
+      }
+    },
+  });
+}
+
+async function admin(path: string, body: unknown) {
+  const port = Number(process.env.FLEET_HUB_PORT ?? 8780);
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(180_000),
+  });
+  const json = (await response.json()) as { error?: string };
+  if (!response.ok) throw new Error(json.error ?? `HTTP ${response.status}`);
+  return json;
+}
+
 const print = (value: unknown) =>
   console.log(typeof value === "string" ? value : JSON.stringify(value, null, 2));
 
@@ -99,6 +140,7 @@ async function main(argv: string[]) {
       server: { type: "string" },
       all: { type: "boolean" },
       json: { type: "boolean" },
+      account: { type: "string" },
     },
   });
 
@@ -109,7 +151,49 @@ async function main(argv: string[]) {
       const fleet = new Fleet(db);
       const push = loadPush();
       const watcher = new Watcher(db, fleet, push ?? (async () => ({ ok: true })));
-      const server = createHubServer({ db, fleet, push });
+      const vault = makeVault(db, push);
+      const server = createHubServer({
+        db,
+        fleet,
+        push,
+        extraRoutes: vaultRoutes(db, vault),
+        requestCredential: async (url, requester) => {
+          const credential = await vault.requestCredential(url, requester);
+          return credential
+            ? {
+                title: credential.title,
+                username: credential.username,
+                password: credential.password,
+              }
+            : null;
+        },
+        onDeviceRevoked: (deviceId) => vault.onDeviceRevoked(deviceId),
+        adminRoutes: async (path, body) => {
+          const input = body as { url?: string };
+          if (path === "/admin/vault/status") return vault.status();
+          if (path === "/admin/vault/lock")
+            return vault.lock("operator").then(() => vault.status());
+          if (path === "/admin/vault/request" && input.url) {
+            const credential = await vault.requestCredential(input.url, "fleet-hub cli");
+            return credential
+              ? {
+                  approved: true,
+                  title: credential.title,
+                  username: credential.username,
+                  password: credential.password ? "<redacted>" : null,
+                }
+              : { approved: false };
+          }
+          if (
+            path === "/admin/device-revoked" &&
+            typeof (body as { id?: string }).id === "string"
+          ) {
+            vault.onDeviceRevoked((body as { id: string }).id);
+            return { ok: true };
+          }
+          throw new Error("Unknown admin route");
+        },
+      });
       const host = process.env.FLEET_HUB_HOST ?? "0.0.0.0";
       const port = Number(process.env.FLEET_HUB_PORT ?? 8780);
       server.listen(port, host, () => {
@@ -255,6 +339,42 @@ async function main(argv: string[]) {
           console.log(`  ! ${request.threadTitle}: ${request.summary}`);
       }
       return;
+    }
+
+    case "vault": {
+      const [sub] = positionals;
+      if (sub === "setup") {
+        const db = openDb();
+        const password = readStdin().replace(/\r?\n$/, "");
+        if (!password) throw new Error("Pipe the 1Password master password on stdin.");
+        const vault = makeVault(
+          db,
+          null,
+          values.account ?? process.env.FLEET_HUB_OP_ACCOUNT ?? null,
+        );
+        const result = await vault.setup(
+          password,
+          values.account ?? process.env.FLEET_HUB_OP_ACCOUNT ?? null,
+        );
+        console.log("Vault ready. Recovery code (shown once; save it in 1Password and offline):\n");
+        console.log(`  ${result.recoveryCode}\n`);
+        console.log(`Vault key wrapped for ${result.wrappedFor.length} phone(s) with a key.`);
+        return;
+      }
+      if (sub === "recover") {
+        const db = openDb();
+        const result = await makeVault(db, null).recover(readStdin().trim());
+        return print(`Vault key re-wrapped for ${result.wrappedFor.length} phone(s).`);
+      }
+      if (sub === "reset") {
+        const db = openDb();
+        makeVault(db, null).reset();
+        return print("Vault removed. Run `vault setup` again; old recovery codes no longer work.");
+      }
+      if (sub === "status" || sub === "lock") return print(await admin(`/admin/vault/${sub}`, {}));
+      if (sub === "request" && positionals[1])
+        return print(await admin("/admin/vault/request", { url: positionals[1] }));
+      throw new Error(USAGE);
     }
 
     case "call": {

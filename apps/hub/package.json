@@ -12,6 +12,7 @@
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
+    "@hpke/core": "1.9.0",
     "@t3tools/fleet": "workspace:*",
     "@types/node": "catalog:",
     "vite-plus": "catalog:"
