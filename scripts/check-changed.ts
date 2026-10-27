@@ -184,14 +184,16 @@ const checkPatches = (): boolean => {
     copy("package.json");
     copy("pnpm-workspace.yaml");
     for (const pkg of packages) copy(`${pkg.dir}/package.json`);
-    const modulesDir = NodePath.join(root, "apps/mobile/modules");
-    if (NodeFS.existsSync(modulesDir)) {
+    // Fork: apps/scope is a copy of apps/mobile with its own local modules and vendored deps.
+    for (const app of ["apps/mobile", "apps/scope"]) {
+      const modulesDir = NodePath.join(root, app, "modules");
+      if (!NodeFS.existsSync(modulesDir)) continue;
       for (const entry of NodeFS.readdirSync(modulesDir)) {
-        const manifest = `apps/mobile/modules/${entry}/package.json`;
+        const manifest = `${app}/modules/${entry}/package.json`;
         if (NodeFS.existsSync(NodePath.join(root, manifest))) copy(manifest);
       }
     }
-    for (const extra of ["apps/mobile/deps", "patches", ".pnpmfile.cjs"]) {
+    for (const extra of ["apps/mobile/deps", "apps/scope/deps", "patches", ".pnpmfile.cjs"]) {
       if (NodeFS.existsSync(NodePath.join(root, extra))) copy(extra);
     }
     const { status, stdout, stderr, error } = NodeChildProcess.spawnSync(

@@ -25,6 +25,9 @@
       "entry": [
         // These fixture scripts are injected into a browser page by path.
         "fixtures/*/*.js",
+        // Fork: run by hand (fleet operations).
+        "fleet/*.ts",
+        "fleet/*.mjs",
         "knip-schemas.ts",
         "mobile-native-client.ts",
         "setup-worktree.ts",
@@ -112,6 +115,29 @@
       ],
     },
     "apps/mobile/modules/t3-source-text": {
+      // React Native codegen discovers component specifications by filename.
+      "entry": ["src/*NativeComponent.ts!"],
+    },
+    // Fork: Scope is a copy of apps/mobile.
+    "apps/scope": {
+      // Expo loads plugins and the fingerprint config by string; Metro embeds the browser entry in the native WebView.
+      "entry": [
+        "index.ts!",
+        "fingerprint.config.js",
+        "plugins/*.cjs",
+        "scripts/generate-device-stream.mts",
+        "src/features/devices/device-stream.browser.ts!",
+        "src/features/browser/preview-stream.browser.ts!",
+      ],
+      // Fonts are configured as asset paths; Expo autolinks the native packages.
+      "ignoreDependencies": [
+        "@expo-google-fonts/dm-sans",
+        "@t3tools/mobile-highlights-native",
+        "@t3tools/mobile-review-diff-native",
+        "@t3tools/mobile-terminal-native",
+      ],
+    },
+    "apps/scope/modules/t3-source-text": {
       // React Native codegen discovers component specifications by filename.
       "entry": ["src/*NativeComponent.ts!"],
     },

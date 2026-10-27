@@ -15,7 +15,7 @@ const ASK_INTERVAL_MS = 2 * 60_000;
 /** The hub waits up to two minutes for the phone. */
 const HUB_TIMEOUT_MS = 150_000;
 
-export const FLEET_CREDENTIAL_SCRIPT = `(() => {
+const FLEET_CREDENTIAL_SCRIPT = `(() => {
   if (globalThis.__t3FleetFill) return;
   const visible = (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
   const findLogin = () => {
@@ -68,7 +68,7 @@ export const FLEET_CREDENTIAL_SCRIPT = `(() => {
  * Main world, by design: sites call navigator.credentials themselves. The page can call the
  * binding too, but the server takes the origin from the execution context, not the payload.
  */
-export const FLEET_PASSKEY_SCRIPT = `(() => {
+const FLEET_PASSKEY_SCRIPT = `(() => {
   const binding = globalThis.${PASSKEY_BINDING};
   if (typeof binding !== "function" || !navigator.credentials || globalThis.__t3FleetPasskeyResolve) return;
   delete globalThis.${PASSKEY_BINDING};
@@ -178,10 +178,7 @@ export type PasskeySource = (
   request: Record<string, unknown> & { origin: string },
 ) => Promise<unknown | null>;
 
-export function hubPasskeySource(
-  hub: FleetHubConfig,
-  fetchImpl: typeof fetch = fetch,
-): PasskeySource {
+function hubPasskeySource(hub: FleetHubConfig, fetchImpl: typeof fetch = fetch): PasskeySource {
   return async (op, request) => {
     const response = await fetchImpl(`${hub.url}/passkeys/${op}`, {
       method: "POST",

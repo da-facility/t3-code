@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @effect-diagnostics nodeBuiltinImport:off globalConsole:off - A one-off CLI around pure parsers.
 // One-off registry import. Reads this machine's ~/.ssh/config, `tailscale status --json` and
 // any Ansible INI inventories you name, merges them and pipes the rows to the hub over SSH.
 // Nothing is written locally. Preview with --dry-run (prints the rows).
@@ -15,7 +16,7 @@ import {
   parseAnsibleIni,
   parseSshConfig,
   parseTailscaleStatus,
-} from "../../packages/fleet/src/importers.ts";
+} from "@t3tools/fleet/importers";
 
 const { values } = NodeUtil.parseArgs({
   options: {
