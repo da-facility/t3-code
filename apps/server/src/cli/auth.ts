@@ -1,4 +1,4 @@
-import { AuthSessionId, AuthStandardClientScopes } from "@t3tools/contracts";
+import { AuthMcpClientAccess, AuthSessionId, AuthStandardClientScopes } from "@t3tools/contracts";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -238,7 +238,47 @@ const sessionCommand = Command.make("session").pipe(
   Command.withSubcommands([sessionIssueCommand, sessionListCommand, sessionRevokeCommand]),
 );
 
+const mcpClientIssueCommand = Command.make("issue", {
+  ...authLocationFlags,
+  access: Flag.Literals("access", AuthMcpClientAccess.literals).pipe(
+    Flag.withDescription("Runtime-mode ceiling for threads the client starts or writes to."),
+    Flag.withDefault("approval-required"),
+  ),
+  ttl: ttlFlag,
+  label: labelFlag,
+  tokenOnly: tokenOnlyFlag,
+}).pipe(
+  Command.withDescription(
+    "Issue a bearer token for an MCP client of this server's /mcp endpoint, such as the fleet hub.",
+  ),
+  Command.withHandler((flags) =>
+    runWithEnvironmentAuth(
+      flags,
+      (environmentAuth) =>
+        Effect.gen(function* () {
+          const issued = yield* environmentAuth.issueMcpClientSession({
+            label: Option.getOrElse(flags.label, () => "MCP client"),
+            access: flags.access,
+            client: { deviceType: "bot" },
+            ...(Option.isSome(flags.ttl) ? { ttl: flags.ttl.value } : {}),
+          });
+          yield* Console.log(
+            flags.tokenOnly
+              ? issued.token
+              : `Issued MCP client session ${issued.sessionId} (${flags.access}), expires ${issued.expiresAt.toString()}\nToken: ${issued.token}`,
+          );
+        }),
+      { quietLogs: flags.tokenOnly },
+    ),
+  ),
+);
+
+const mcpClientCommand = Command.make("mcp-client").pipe(
+  Command.withDescription("Issue MCP client sessions; list and revoke them with `auth session`."),
+  Command.withSubcommands([mcpClientIssueCommand]),
+);
+
 export const authCommand = Command.make("auth").pipe(
   Command.withDescription("Manage the local auth control plane for headless deployments."),
-  Command.withSubcommands([pairingCommand, sessionCommand]),
+  Command.withSubcommands([pairingCommand, sessionCommand, mcpClientCommand]),
 );

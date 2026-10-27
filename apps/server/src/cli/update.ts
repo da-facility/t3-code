@@ -222,6 +222,13 @@ export const updateCommand = Command.make("update", {
   ),
   Command.withHandler((flags) =>
     Effect.gen(function* () {
+      // Fork: updating means re-running the fleet installer with a new version.
+      if (process.env.T3CODE_FLEET_ENABLE_UPDATE !== "1") {
+        return yield* new CliUpdateError({
+          reason:
+            "t3 update is disabled in this build. Re-run the fleet installer with --version <new version>.",
+        });
+      }
       const logLevel = yield* GlobalFlag.LogLevel;
       const config = yield* resolveCliAuthConfig(flags, logLevel);
       return yield* runUpdate({

@@ -26,7 +26,6 @@ import { useEnvironmentSettings } from "~/hooks/useSettings";
 import { serverEnvironment, updateOutdatedServer } from "~/state/server";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { useAtomCommand } from "~/state/use-atom-command";
-import { manualServerUpdateCommand } from "~/versionSkew";
 import { Button } from "./ui/button";
 import { toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -243,6 +242,9 @@ export function ServerUpdateAction({
     },
   });
 
+  // Fork: servers update by re-running the fleet installer, never from a client.
+  if (selfUpdate === null) return null;
+
   const handleUpdate = async () => {
     if (
       !canUpdateServer(appAtomRegistry.get(sessionStateAtom)) ||
@@ -279,8 +281,7 @@ export function ServerUpdateAction({
     );
   }
 
-  const manualCommand =
-    selfUpdate === null ? manualServerUpdateCommand(targetVersion, installation) : null;
+  const manualCommand: string | null = null;
   const actionLabel =
     manualCommand !== null
       ? installation?.kind === "npm-global"
