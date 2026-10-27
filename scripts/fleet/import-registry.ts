@@ -1,0 +1,65 @@
+#!/usr/bin/env node
+// One-off registry import. Reads this machine's ~/.ssh/config, `tailscale status --json` and
+// any Ansible INI inventories you name, merges them and pipes the rows to the hub over SSH.
+// Nothing is written locally. Preview with --dry-run (prints the rows).
+//
+//   node scripts/fleet/import-registry.ts --hub <ssh-target> [--inventory path]... [--dry-run]
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import * as NodeUtil from "node:util";
+
+import {
+  mergeImported,
+  parseAnsibleIni,
+  parseSshConfig,
+  parseTailscaleStatus,
+} from "../../packages/fleet/src/importers.ts";
+
+const { values } = NodeUtil.parseArgs({
+  options: {
+    hub: { type: "string" },
+    inventory: { type: "string", multiple: true },
+    "dry-run": { type: "boolean" },
+    "no-tailscale": { type: "boolean" },
+  },
+});
+
+const sshConfigPath = NodePath.join(NodeOS.homedir(), ".ssh", "config");
+const sshServers = NodeFS.existsSync(sshConfigPath)
+  ? parseSshConfig(NodeFS.readFileSync(sshConfigPath, "utf8"))
+  : [];
+
+let tailscaleServers: ReturnType<typeof parseTailscaleStatus> = [];
+if (!values["no-tailscale"]) {
+  for (const bin of ["tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale"]) {
+    try {
+      const json = NodeChildProcess.execFileSync(bin, ["status", "--json"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      tailscaleServers = parseTailscaleStatus(json);
+      break;
+    } catch {}
+  }
+}
+
+const ansibleServers = (values.inventory ?? []).flatMap((path) =>
+  parseAnsibleIni(NodeFS.readFileSync(path, "utf8")),
+);
+
+const rows = mergeImported(sshServers, tailscaleServers, ansibleServers);
+console.error(
+  `ssh config: ${sshServers.length}, tailscale: ${tailscaleServers.length}, ansible: ${ansibleServers.length} -> ${rows.length} servers`,
+);
+
+if (values["dry-run"] || !values.hub) {
+  console.log(JSON.stringify(rows, null, 2));
+  if (!values.hub && !values["dry-run"]) console.error("Pass --hub <ssh-target> to import.");
+} else {
+  NodeChildProcess.execFileSync("ssh", [values.hub, "fleet-hub", "server", "import"], {
+    input: JSON.stringify(rows),
+    stdio: ["pipe", "inherit", "inherit"],
+  });
+}
