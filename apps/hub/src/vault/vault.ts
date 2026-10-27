@@ -10,7 +10,7 @@ import {
   seal,
   suite,
 } from "./hpke.ts";
-import { matchLogins, type OpCli, type OpCredential } from "./op.ts";
+import { matchLogins, OpCli, type OpCredential } from "./op.ts";
 import { assertPasskey, createPasskey, type PasskeyRecord } from "./passkeys.ts";
 
 /**
@@ -174,6 +174,14 @@ export class Vault {
     return raw ? (JSON.parse(raw) as VaultRecord) : null;
   }
 
+  /** op bound to the account chosen at setup, when one was. */
+  private opClient(): OpCli {
+    const account = this.record()?.account;
+    return account && account !== this.op.account
+      ? new OpCli(this.op.bin, account, this.op.env)
+      : this.op;
+  }
+
   private saveRecord(record: VaultRecord) {
     this.db.setKv(RECORD_KEY, JSON.stringify(record));
   }
@@ -221,8 +229,12 @@ export class Vault {
     const key = NodeCrypto.randomBytes(32);
     try {
       // Fail early if the password does not open the account.
-      await this.op.signin(password);
-      await this.op.signout();
+      const op =
+        account && account !== this.op.account
+          ? new OpCli(this.op.bin, account, this.op.env)
+          : this.op;
+      await op.signin(password);
+      await op.signout();
       const code = new Uint8Array(NodeCrypto.randomBytes(32));
       const recovery = await recoveryKeyPair(code);
       this.saveRecord({
@@ -335,7 +347,7 @@ export class Vault {
     }
     let opToken: string;
     try {
-      opToken = await this.op.signin(password);
+      opToken = await this.opClient().signin(password);
     } catch (error) {
       key.fill(0);
       throw new VaultError(
@@ -420,7 +432,7 @@ export class Vault {
     if (session) {
       session.key.fill(0);
       session.opToken = "";
-      await this.op.signout();
+      await this.opClient().signout();
     }
   }
 
@@ -484,7 +496,7 @@ export class Vault {
     } catch {}
     const answer = await this.ask("login", url, requester, `Sign in to ${host}`, []);
     if (!answer || !this.session) return null;
-    return this.op.credential(this.session.opToken, answer.itemId);
+    return this.opClient().credential(this.session.opToken, answer.itemId);
   }
 
   private storedPasskeys(rpId: string): StoredPasskey[] {
@@ -549,7 +561,7 @@ export class Vault {
 
   private async loginOptions(url: string) {
     if (!this.session) return [];
-    return matchLogins(await this.op.logins(this.session.opToken), url).map((login) => ({
+    return matchLogins(await this.opClient().logins(this.session.opToken), url).map((login) => ({
       id: login.id,
       title: login.title,
     }));
