@@ -39,6 +39,10 @@ Repo: `da-facility/t3-code`, a public fork of pingdotgg/t3code. **No PII in the 
 - **Scope identity:** bundle id `io.dafacility.fleetscope`; the Apple team id is passed at build time (`DEVELOPMENT_TEAM`) and never committed.
 - **Scanning:** manual (`fleet-hub scan <id>|--all`) with the hub's own key, which each host must authorize with `from=` limited to the tailnet. No real host was scanned during setup.
 - **Registry import:** ran once from the installing Mac (`scripts/fleet/import-registry.ts`): ssh config and Tailscale peers. No Ansible inventories were found; the importer takes INI inventories with `--inventory`.
+- **Vault crypto:** HPKE base mode with DHKEM(P-256), HKDF-SHA256 and AES-256-GCM (CryptoKit's `P256_SHA256_AES_GCM_256`, `@hpke/core` on the hub; interop checked). The master password and passkey private keys are AES-256-GCM under the vault key K. The recovery code is 32 random bytes that derive an HPKE key pair (RFC 9180 DeriveKeyPair); the hub keeps only its public half and K sealed to it, so a rotated K is re-sealed without the code. Credential requests wait two minutes for the phone.
+- **Vault setup happens on the hub:** `fleet-hub vault setup` reads the master password on stdin, checks it with `op signin`, then signs out. Phones register their public key first; a phone enrolled later gets K wrapped at the next unlock from an existing phone.
+- **Browser fill:** a login form in any frame prompts the phone at most once per site every two minutes; the approved login is filled and submitted from an isolated world. Passkeys use a main-world `navigator.credentials` override; the server takes the origin from the CDP execution context, never from the page, and the hub checks the rpId against it. Conditional (autofill) passkey requests are not answered.
+- **Simulator testing:** T3's device tools are turned off in this environment, so Scope was only launched in the simulator (setup screen renders); interactive flows were tested against the hub with scripted clients instead.
 - **VPS firewall:** ufw denies all incoming traffic except 22/tcp and anything on `tailscale0`. Public SSH stays open until Tailscale SSH is confirmed.
 - **Out of scope:**
   - Windows.
@@ -100,17 +104,17 @@ Repo: `da-facility/t3-code`, a public fork of pingdotgg/t3code. **No PII in the 
 
 ## 6a. Mobile, part 1
 
-- [ ] New app copied from `apps/mobile`, with a new UI (native Liquid Glass via `@expo/ui` / `expo-glass-effect`) and a new bundle id.
-- [ ] Connects to the hub for threads, approvals and the fleet.
+- [x] New app copied from `apps/mobile`, with a new UI (native Liquid Glass via `@expo/ui` / `expo-glass-effect`) and a new bundle id.
+- [x] Connects to the hub for threads, approvals and the fleet.
 - [ ] Remote browser view and control: direct stream by default, hub relay as an option.
-- [ ] APNs push from the hub (time-sensitive).
+- [x] APNs push from the hub (time-sensitive). Needs your APNs key (see MORNING.md).
 - [ ] Phone runs Tailscale (VPN on demand) so it can reach the hub.
 
 ## 6b. Mobile, part 2: keys
 
-- [ ] Secure Enclave P-256 key with Face ID; HPKE (CryptoKit ↔ `@hpke/core`). Needs a small native module.
-- [ ] Enrollment, revocation (rotates the vault key), recovery code shown at setup.
-- [ ] Approval screen: open = unlocked, with a heartbeat to the hub. Each credential request is a confirmation modal.
+- [x] Secure Enclave P-256 key with Face ID; HPKE (CryptoKit ↔ `@hpke/core`). Needs a small native module.
+- [x] Enrollment, revocation (rotates the vault key), recovery code shown at setup.
+- [x] Approval screen: open = unlocked, with a heartbeat to the hub. Each credential request is a confirmation modal.
 
 ## 7. Vault and 1Password (on the hub)
 
@@ -121,17 +125,17 @@ Repo: `da-facility/t3-code`, a public fork of pingdotgg/t3code. **No PII in the 
   - Also check that the password can be piped on stdin to `op signin --raw`.
 - [ ] Never run `op signout --forget`. It removes the account from the device, so the next sign-in counts as a new device and asks for 2FA again.
 - [ ] Fallback if `op` does ask for 2FA on every sign-in: store the 1Password TOTP secret in the vault too, and the hub generates the code after phone approval. This only works if 1Password's second factor is TOTP, not a security key.
-- [ ] Unlock:
+- [x] Unlock:
   1. The hub sends a fresh ephemeral key.
   2. The phone runs Face ID, unwraps the vault key and seals it to that ephemeral key.
   3. The hub decrypts the master password and runs `op signin --raw`.
   4. The session token is held in memory only. It lasts up to 30 minutes (`op`'s idle limit).
-- [ ] Lock early when needed with `op signout` (the account stays added) and wipe the vault key and token. The vault key is also wiped when the phone's approval screen closes or its heartbeat stops (30 s).
+- [x] Lock early when needed with `op signout` (the account stays added) and wipe the vault key and token. The vault key is also wiped when the phone's approval screen closes or its heartbeat stops (30 s).
 
 ## 8. Browser credential scripts (fork's server browser)
 
-- [ ] Login-form detection and fill, per frame. Asks the hub, which asks the phone (confirmation modal), then fills and submits.
-- [ ] Passkeys: a main-world override of `navigator.credentials.create/get`, bridged with `Runtime.addBinding`. The hub signs; BE/BS flags set. New registrations are saved to the vault.
+- [x] Login-form detection and fill, per frame. Asks the hub, which asks the phone (confirmation modal), then fills and submits.
+- [x] Passkeys: a main-world override of `navigator.credentials.create/get`, bridged with `Runtime.addBinding`. The hub signs; BE/BS flags set. New registrations are saved to the vault.
 
 ## 9. Bugfix, hardening
 
