@@ -30,6 +30,13 @@ T3 Code has 3 key app surfaces: **web**, **desktop**, and **mobile**.
 
 **Mobile** is a React Native app for both iOS and Android, available on the App Store and Google Play. The mobile app allows for connecting to any T3 Code server to control work remotely.
 
+## This fork (da-facility/t3-code)
+
+This is a public fork of pingdotgg/t3code that adds a fleet hub (`apps/hub`), the Scope mobile app (`apps/scope`), a service installer (`scripts/fleet/`) and fleet packages. Keep new work in new directories so upstream rebases stay small.
+
+- **No PII, ever.** No hostnames, IP addresses, usernames, emails, SSH key names, tokens or tailnet names in code, commits, docs, test fixtures or screenshots. Use placeholders such as `host-a`, `user@host`, `100.64.0.1` and `example.ts.net`. Fleet data (servers, addresses, keys) lives only on the hub, never in the repo. Check every diff for this before committing.
+- `TODO.md` (the fleet spec and its decisions) and `MORNING.md` are intentional and tracked, even though the upstream rules below say not to commit plans.
+
 ## A note from Theo
 
 I like ambitious ideas, simple systems, and software that feels obvious. Do not preserve complexity just because it already exists. Do not introduce machinery because it looks architecturally impressive. Understand the real constraint, then fight for the smallest model that makes the correct behavior unsurprising.
