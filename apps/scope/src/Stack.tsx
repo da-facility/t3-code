@@ -1,5 +1,6 @@
 import { isDraftThreadRoute } from "./features/threads/thread-route-state";
 import { FleetScreen } from "./features/fleet/FleetScreen";
+import { VaultScreen } from "./features/fleet/VaultScreen";
 import { ComponentCatalogScreen } from "./features/development/ComponentCatalogScreen";
 import { PullRequestGuideStopScreen } from "./features/pull-requests/guide/PullRequestGuideScreen";
 import { PullRequestInlineCommentScreen } from "./features/pull-requests/PullRequestInlineCommentScreen";
@@ -622,6 +623,11 @@ const RootStackConfig = createWorkspaceStackNavigator({
       screen: FleetScreen,
       linking: "fleet",
       options: { headerShown: false },
+    }),
+    Vault: createNativeStackScreen({
+      screen: VaultScreen,
+      linking: "vault",
+      options: { ...DETAIL_HEADER_OPTIONS, title: "" },
     }),
     Home: createNativeStackScreen({
       screen: WorkspaceRootScreen,

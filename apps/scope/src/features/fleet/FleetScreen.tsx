@@ -3,7 +3,8 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
 import { AsyncResult } from "effect/reactivity";
-import { useCallback, useMemo, useState } from "react";
+import * as Notifications from "expo-notifications";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, RefreshControl, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -23,8 +24,16 @@ import {
   relativeTime,
   summarizeFleet,
 } from "./fleetModel";
-import { enrollWithHub, forgetHub, type HubLink, hubRequest, useHubLink } from "./hubClient";
+import {
+  enrollWithHub,
+  forgetHub,
+  type HubLink,
+  hubRequest,
+  loadHubLink,
+  useHubLink,
+} from "./hubClient";
 import { registerPushWithHub, sendTestPush } from "./push";
+import { scopeVault } from "./vaultNative";
 
 /**
  * Scope's home: the whole fleet through the hub. Threads open in the T3
@@ -57,7 +66,15 @@ function HubSetup() {
     setBusy(true);
     setError(null);
     try {
-      await enrollWithHub(normalized, name.trim() || "iPhone");
+      const device = await enrollWithHub(normalized, name.trim() || "iPhone");
+      // The owner is approved at once and registers its vault key now; others do it after approval.
+      if (device.status === "approved" && scopeVault) {
+        const publicKey = await scopeVault.ensureKey();
+        const token = (await loadHubLink())!.token;
+        await hubRequest({ url: normalized, token }, "/api/vault/key", { publicKey }).catch(
+          () => {},
+        );
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -242,6 +259,25 @@ function FleetDashboard({ link }: { readonly link: HubLink }) {
     [ensureConnected, navigation],
   );
 
+  useEffect(() => {
+    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data as Record<string, string | undefined>;
+      if (data.kind === "credential") {
+        navigation.navigate("Vault" as never);
+        return;
+      }
+      const thread =
+        data.serverId && data.threadId
+          ? [...(summary?.attention ?? []), ...(summary?.recent ?? [])].find(
+              (candidate) =>
+                candidate.serverId === data.serverId && candidate.threadId === data.threadId,
+            )
+          : undefined;
+      if (thread) void openThread(thread);
+    });
+    return () => subscription.remove();
+  }, [navigation, openThread, summary]);
+
   const enablePush = async () => {
     try {
       const result = await registerPushWithHub(link);
@@ -313,11 +349,18 @@ function FleetDashboard({ link }: { readonly link: HubLink }) {
             {link.url.replace(/^https?:\/\//, "")}
           </Text>
         </View>
-        <Button
-          label="Workspace"
-          tone="secondary"
-          onPress={() => navigation.navigate("Home" as never)}
-        />
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <Button
+            label="Vault"
+            tone="secondary"
+            onPress={() => navigation.navigate("Vault" as never)}
+          />
+          <Button
+            label="Workspace"
+            tone="secondary"
+            onPress={() => navigation.navigate("Home" as never)}
+          />
+        </View>
       </View>
 
       {error ? (
