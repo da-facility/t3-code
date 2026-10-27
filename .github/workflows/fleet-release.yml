@@ -61,7 +61,7 @@ jobs:
             arch: arm64
             rust_target: aarch64-unknown-linux-gnu
           - key: darwin-arm64
-            runner: macos-15
+            runner: macos-latest
             platform: mac
             arch: arm64
             rust_target: aarch64-apple-darwin
@@ -131,8 +131,11 @@ jobs:
           path: release-cli/*
           if-no-files-found: error
 
+  # Publishes whatever archives built, so a slow or missing macOS runner does
+  # not hold back the Linux hosts; re-run the workflow to attach a late archive.
   release:
     needs: [version, build]
+    if: ${{ !cancelled() && needs.version.result == 'success' }}
     runs-on: ubuntu-24.04
     env:
       VERSION: ${{ needs.version.outputs.version }}
