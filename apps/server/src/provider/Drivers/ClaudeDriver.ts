@@ -23,6 +23,7 @@ import {
 } from "../../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { claudeUsageReader } from "./claudeUsage.ts";
+import { makeClaudeAuth } from "./ClaudeAuth.ts";
 import { makeClaudeScopedLimitNames } from "../claudeUsageLimits.ts";
 import * as ClaudeResetCredits from "../claudeResetCredits.ts";
 import * as ResetCreditCoordinator from "../resetCreditCoordinator.ts";
@@ -58,6 +59,7 @@ import {
 import {
   makeClaudeCapabilitiesCacheKey,
   makeClaudeContinuationGroupKey,
+  makeClaudeEnvironment,
   resolveClaudeHomePath,
 } from "./ClaudeHome.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -161,12 +163,17 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
         ? configDir
         : undefined,
     );
-    const stampIdentity = withInstanceIdentity({
+    const stampInstanceIdentity = withInstanceIdentity({
       instanceId,
       driverKind: DRIVER_KIND,
       displayName,
       accentColor,
       continuationGroupKey,
+    });
+    // Fork: Settings -> Providers offers "Sign in with Claude" (see ClaudeAuth.ts).
+    const stampIdentity: typeof stampInstanceIdentity = (provider) => ({
+      ...stampInstanceIdentity(provider),
+      setup: { canAuthenticate: true, canInstall: false },
     });
 
     const scopedLimitNames = yield* makeClaudeScopedLimitNames;
@@ -384,9 +391,22 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       ),
     );
 
+    const auth = yield* makeClaudeAuth({
+      instanceId,
+      binaryPath: effectiveConfig.binaryPath,
+      configDir,
+      cwd: stateDir,
+      env: yield* makeClaudeEnvironment(effectiveConfig, processEnv),
+      refresh: Cache.invalidateAll(capabilitiesProbeCache).pipe(
+        Effect.andThen(snapshot.refresh),
+        Effect.ignore,
+      ),
+    });
+
     return {
       instanceId,
       driverKind: DRIVER_KIND,
+      auth,
       continuationIdentity: {
         ...fallbackContinuationIdentity,
         continuationKey: continuationGroupKey,
