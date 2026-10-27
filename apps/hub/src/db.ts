@@ -348,7 +348,13 @@ export class HubDb {
 
   // Fleet MCP tokens
 
+  /** A host keeps one token: issuing a new one for a server revokes its old ones. */
   issueToken(label: string, serverId: string | null) {
+    if (serverId !== null) {
+      this.db
+        .prepare("UPDATE tokens SET revoked_at = ? WHERE server_id = ? AND revoked_at IS NULL")
+        .run(this.iso(), serverId);
+    }
     const token = newToken("fleet");
     const id = NodeCrypto.randomUUID();
     this.db

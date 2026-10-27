@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalTimers:off - Playwright callbacks run outside the Effect runtime.
 // Screencasts ignore emulated device scale; real 2x keeps captures sharp.
 // --disable-gpu uses cheaper software compositing while preserving SwiftShader WebGL.
+import { installFleetCredentials } from "./fleetCredentials.ts";
 import {
   BUILT_IN_BROWSER_PROFILES,
   DEFAULT_BROWSER_PROFILE_ID,
@@ -1116,6 +1117,8 @@ const make = Effect.gen(function* () {
       worldName: CLIPBOARD_WORLD,
       runImmediately: true,
     });
+    // Fork: 1Password fill through the fleet hub, approved on the phone.
+    await installFleetCredentials(cdp).catch(constVoid);
   };
 
   /** Out-of-process frames need their own copy-recording session until target closure. */

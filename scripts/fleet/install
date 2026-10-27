@@ -175,6 +175,13 @@ http_headers = { Authorization = "Bearer $FLEET_TOKEN" }
 TOML
 mv "$config.tmp" "$config"
 echo "Codex: fleet MCP added to ~/.codex/config.toml." >&2
+# The server browser asks the hub for 1Password logins with the same token.
+env_file="$HOME/.t3/service.env"
+grep -v -e "^FLEET_HUB_URL=" -e "^FLEET_HUB_TOKEN=" "$env_file" > "$env_file.tmp" 2>/dev/null || true
+printf 'FLEET_HUB_URL=%s\nFLEET_HUB_TOKEN=%s\n' "$HUB_URL" "$FLEET_TOKEN" >> "$env_file.tmp"
+mv "$env_file.tmp" "$env_file"
+chmod 600 "$env_file"
+t3 service restart >/dev/null 2>&1 || echo "Restart the T3 service to enable browser credential fill." >&2
 REMOTE
     unset fleet_token
   fi
