@@ -80,6 +80,8 @@ export function resolveRelayTracingConfig() {
 }
 
 export function hasCloudPublicConfig(): boolean {
+  // Fork: T3 Connect and Clerk stay hidden; the fleet hub over Tailscale replaces them.
+  if (import.meta.env.VITE_T3CODE_FLEET_ENABLE_CONNECT !== "1") return false;
   const config = resolveCloudPublicConfig();
   if (!config.clerkPublishableKey || !config.clerkJwtTemplate || !config.relayUrl) {
     return false;

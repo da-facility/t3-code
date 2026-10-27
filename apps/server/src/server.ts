@@ -701,6 +701,9 @@ const layerCommandReadiness = HttpRouter.middleware(
   { global: true },
 );
 
+/** Fork: T3 Connect stays off unless explicitly re-enabled for debugging. */
+const FLEET_CONNECT_DISABLED = process.env.T3CODE_FLEET_ENABLE_CONNECT !== "1";
+
 const layerMakeRoutes = Layer.mergeAll(
   Layer.mergeAll(
     HttpApiBuilder.layer(EnvironmentHttpApi).pipe(
@@ -850,6 +853,10 @@ const layerMakeServer = Layer.unwrap(
       : Layer.empty;
     const layerCloudDesiredLinkReconcile = Layer.effectDiscard(
       Effect.gen(function* () {
+        // Fork: T3 Connect is never started; the fleet hub over Tailscale replaces it.
+        if (FLEET_CONNECT_DISABLED) {
+          return yield* Deferred.succeed(cloudLinkParked, undefined).pipe(Effect.orDie);
+        }
         const cloudLink = yield* CloudLink.CloudLink;
         const releaseManagedTunnel = cloudLink.releaseManagedTunnelOnShutdown().pipe(
           Effect.timeout("10 seconds"),
