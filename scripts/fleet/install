@@ -1,0 +1,202 @@
+#!/usr/bin/env bash
+# Installs (or updates) the fork's T3 server on a macOS or Linux host over SSH,
+# runs it as a background service, installs Claude Code, links the host to the
+# fleet hub and gives its agents the fleet MCP. Re-run with a newer --version to
+# update; that is the only update path.
+#
+#   scripts/fleet/install <ssh-target> [options]
+#
+# Options:
+#   --version V        t3 version to install, e.g. 0.1.3-fleet.1 (default: newest fleet release)
+#   --name ID          Fleet id for this host (default: the target's short hostname)
+#   --url URL          URL other machines use to reach this T3 server
+#                      (default: http://<tailscale name>:3773)
+#   --hub TARGET       SSH target of the hub; links this host and installs the fleet MCP
+#   --hub-url URL      URL agents on this host use for the hub (default: http://<hub tailscale name>:8780)
+#   --no-claude        Skip installing Claude Code
+#   --dry-run          Print what would run; change nothing
+#
+# Environment: FLEET_REPO (default da-facility/t3-code) selects the release source.
+set -euo pipefail
+
+repo="${FLEET_REPO:-da-facility/t3-code}"
+release_base="https://github.com/${repo}/releases/download"
+root="$(cd "$(dirname "$0")/../.." && pwd)"
+
+usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+target="" version="" name="" url="" hub="" hub_url="" claude=1 dry=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --version) version="${2#v}"; shift 2 ;;
+    --name) name="$2"; shift 2 ;;
+    --url) url="$2"; shift 2 ;;
+    --hub) hub="$2"; shift 2 ;;
+    --hub-url) hub_url="$2"; shift 2 ;;
+    --no-claude) claude=0; shift ;;
+    --dry-run) dry=1; shift ;;
+    -h|--help) usage ;;
+    -*) echo "unknown option: $1" >&2; usage 1 ;;
+    *) [ -z "$target" ] || { echo "one target at a time" >&2; exit 1; }; target="$1"; shift ;;
+  esac
+done
+[ -n "$target" ] || usage 1
+
+say() { printf '\033[1m==>\033[0m %s\n' "$*" >&2; }
+die() { printf 'install: %s\n' "$*" >&2; exit 1; }
+# rsh <target> [NAME=value]...: runs `bash -s` on the target with stdin as the script.
+# Values are shell-quoted because ssh hands the remote shell a single string.
+rsh() {
+  local host="$1" cmd="env"; shift
+  for kv in "$@"; do cmd+=" $(printf '%q' "$kv")"; done
+  ssh -o BatchMode=yes "$host" "$cmd bash -s"
+}
+run_remote() { # run_remote <target> <script> [NAME=value...]
+  local host="$1" script="$2"; shift 2
+  if [ "$dry" = 1 ]; then printf '[dry-run] on %s:\n%s\n' "$host" "$script" >&2; return 0; fi
+  rsh "$host" "$@" <<<"$script"
+}
+
+if [ -z "$version" ]; then
+  version="$(curl -fsSL "https://api.github.com/repos/${repo}/releases?per_page=30" |
+    node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=JSON.parse(s).find(r=>!r.draft&&/-fleet\./.test(r.tag_name));if(!r)process.exit(1);console.log(r.tag_name.replace(/^v/,""))})')" ||
+    die "no fleet release found in ${repo}; pass --version"
+fi
+say "Installing t3 ${version} on ${target}"
+
+# 1. Facts about the host.
+facts="$(ssh -o BatchMode=yes "$target" bash -s <<'REMOTE'
+set -e
+echo "os=$(uname -s)"
+echo "arch=$(uname -m)"
+echo "host=$(hostname -s 2>/dev/null || hostname)"
+echo "user=$(id -un)"
+ts=""
+for bin in tailscale /Applications/Tailscale.app/Contents/MacOS/Tailscale; do
+  if command -v "$bin" >/dev/null 2>&1; then
+    ts="$("$bin" status --json 2>/dev/null | sed -n 's/^\t\{0,1\} *"DNSName": *"\([^"]*\)\.",*$/\1/p' | head -1)"
+    break
+  fi
+done
+echo "tailscale=$ts"
+if [ "$(uname -s)" = Darwin ]; then
+  launchctl print "gui/$(id -u)" >/dev/null 2>&1 && echo "gui=1" || echo "gui=0"
+fi
+command -v claude >/dev/null 2>&1 || [ -x "$HOME/.local/bin/claude" ] && echo "claude=1" || echo "claude=0"
+REMOTE
+)" || die "cannot reach ${target} over SSH"
+fact() { printf '%s\n' "$facts" | sed -n "s/^$1=//p" | head -1; }
+os="$(fact os)"; host_short="$(fact host)"
+case "$os" in Linux|Darwin) ;; *) die "unsupported OS: $os" ;; esac
+if [ "$os" = Darwin ] && [ "$(fact gui)" != 1 ]; then
+  die "macOS needs a logged-in GUI session for the launchd agent; log in on ${target} first"
+fi
+name="${name:-$(printf '%s' "$host_short" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9.-' '-')}"
+ts_name="$(fact tailscale)"
+url="${url:-http://${ts_name:-${target#*@}}:3773}"
+
+# 2. The t3 runtime, through the upstream installer pointed at this fork's releases.
+say "Downloading t3 ${version}"
+if [ "$dry" = 1 ]; then
+  echo "[dry-run] install.sh with T3CODE_VERSION=${version} T3CODE_RELEASE_BASE_URL=${release_base}" >&2
+else
+  ssh -o BatchMode=yes "$target" env T3CODE_VERSION="$version" T3CODE_RELEASE_BASE_URL="$release_base" NO_COLOR=1 sh -s \
+    <"$root/scripts/install.sh" >&2
+fi
+
+# 3. Background service and providers.
+say "Installing the background service"
+run_remote "$target" '
+set -euo pipefail
+export PATH="$HOME/.local/bin:$PATH"
+mkdir -p "$HOME/.t3"
+env_file="$HOME/.t3/service.env"
+touch "$env_file"
+grep -v "^T3CODE_RELEASE_BASE_URL=" "$env_file" > "$env_file.tmp" || true
+echo "T3CODE_RELEASE_BASE_URL=$RELEASE_BASE" >> "$env_file.tmp"
+mv "$env_file.tmp" "$env_file"
+t3 service install --allow-downgrade
+if [ "$WANT_CLAUDE" = 1 ] && [ ! -x "$HOME/.local/bin/claude" ] && ! command -v claude >/dev/null 2>&1; then
+  echo "Installing Claude Code (native installer)..." >&2
+  curl -fsSL https://claude.ai/install.sh | bash >&2
+fi
+for _ in $(seq 1 60); do
+  curl -sf http://127.0.0.1:3773/.well-known/t3/environment >/dev/null && break
+  sleep 1
+done
+curl -sf http://127.0.0.1:3773/.well-known/t3/environment >/dev/null || { echo "t3 did not come up on port 3773; see ~/.t3/userdata/logs/boot-service.log" >&2; exit 1; }
+' RELEASE_BASE="$release_base" WANT_CLAUDE="$claude"
+
+# 4. Hub link and the fleet MCP.
+hub_scopes="orchestration:read orchestration:operate settings:write providers:manage preview:operate diagnostics:read terminal:read terminal:operate source-control:write filesystem:read filesystem:write access:read access:write"
+if [ -n "$hub" ]; then
+  if [ -z "$hub_url" ]; then
+    hub_ts="$(ssh -o BatchMode=yes "$hub" 'tailscale status --json 2>/dev/null' | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log((JSON.parse(s).Self?.DNSName??"").replace(/\.$/,""))}catch{console.log("")}})')" || true
+    [ -n "$hub_ts" ] || die "cannot tell the hub's tailscale name; pass --hub-url"
+    hub_url="http://${hub_ts}:8780"
+  fi
+  say "Linking ${name} to the hub"
+  if [ "$dry" = 1 ]; then
+    echo "[dry-run] mint hub credentials on ${target}, then fleet-hub link ${name} --url ${url}" >&2
+  else
+    # Credentials go host -> this machine's memory -> hub stdin; nothing is written here.
+    creds="$(rsh "$target" SCOPES="$hub_scopes" <<'REMOTE'
+set -euo pipefail
+export PATH="$HOME/.local/bin:$PATH"
+args=(); for s in $SCOPES; do args+=(--scope "$s"); done
+bearer="$(t3 auth session issue --label fleet-hub --ttl 3650d --token-only "${args[@]}" 2>/dev/null | sed '/^$/d' | tail -1)"
+mcp="$(t3 auth mcp-client issue --label fleet-hub --access full-access --ttl 3650d --token-only 2>/dev/null | sed '/^$/d' | tail -1)"
+[ -n "$bearer" ] && [ -n "$mcp" ] || { echo "could not mint hub credentials" >&2; exit 1; }
+printf '{"bearer":"%s","mcp":"%s"}' "$bearer" "$mcp"
+REMOTE
+)"
+    ssh -o BatchMode=yes "$hub" fleet-hub server add "$name" --address "${ts_name:-${target#*@}}" --user "$(fact user)" >/dev/null
+    printf '%s' "$creds" | ssh -o BatchMode=yes "$hub" fleet-hub link "$name" --url "$url" >&2
+    unset creds
+    fleet_token="$(ssh -o BatchMode=yes "$hub" fleet-hub token issue --label "agents@${name}" --server "$name")"
+    say "Giving agents on ${name} the fleet MCP"
+    rsh "$target" HUB_URL="$hub_url" FLEET_TOKEN="$fleet_token" <<'REMOTE'
+set -euo pipefail
+export PATH="$HOME/.local/bin:$PATH"
+if command -v claude >/dev/null 2>&1; then
+  claude mcp remove --scope user fleet >/dev/null 2>&1 || true
+  claude mcp add --scope user --transport http fleet "$HUB_URL/mcp" --header "Authorization: Bearer $FLEET_TOKEN" >/dev/null
+  echo "Claude: fleet MCP added (user scope)." >&2
+fi
+config="$HOME/.codex/config.toml"
+mkdir -p "$HOME/.codex"
+touch "$config"
+chmod 600 "$config"
+awk 'BEGIN{skip=0} /^\[mcp_servers\.fleet\]/{skip=1; next} /^\[/{skip=0} !skip' "$config" > "$config.tmp"
+cat >> "$config.tmp" <<TOML
+
+[mcp_servers.fleet]
+url = "$HUB_URL/mcp"
+http_headers = { Authorization = "Bearer $FLEET_TOKEN" }
+TOML
+mv "$config.tmp" "$config"
+echo "Codex: fleet MCP added to ~/.codex/config.toml." >&2
+REMOTE
+    unset fleet_token
+  fi
+fi
+
+# 5. Where to sign in.
+pair_url=""
+if [ "$dry" = 0 ]; then
+  pair_url="$(rsh "$target" BASE_URL="$url" <<'REMOTE' || true
+export PATH="$HOME/.local/bin:$PATH"
+t3 auth pairing create --base-url "$BASE_URL" --label "browser sign-in" --ttl 1h 2>/dev/null | grep -o 'http[^ ]*pair#token=[^ ]*' | head -1
+REMOTE
+)"
+fi
+cat >&2 <<DONE
+
+T3 ${version} is running on ${target} (${name}).
+
+  Sign in to providers:  ${url}/settings/providers
+  Pair this browser:     ${pair_url:-run \`t3 auth pairing create --base-url ${url}\` on the host}
+                         (one-time link, valid for an hour)
+
+  Claude: "Sign in with Claude" in Settings -> Providers.
+  Codex:  "Install", then "Continue with ChatGPT" in Settings -> Providers.
+DONE

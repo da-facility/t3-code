@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Builds the fleet hub and installs it on an Ubuntu host as a systemd service.
+#   scripts/fleet/deploy-hub <ssh-target> [--port 8780]
+# Re-running it updates the hub in place; its state in /var/lib/fleet-hub stays.
+# The hub listens on all interfaces; keep it behind a firewall that only admits
+# the tailnet (the hub setup in MORNING.md does this with ufw).
+set -euo pipefail
+
+usage() { sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+target=""; port=8780
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --port) port="$2"; shift 2 ;;
+    -h|--help) usage ;;
+    -*) echo "unknown option $1" >&2; usage 1 ;;
+    *) target="$1"; shift ;;
+  esac
+done
+[ -n "$target" ] || usage 1
+
+root="$(cd "$(dirname "$0")/../.." && pwd)"
+node_version="$(node -p 'require(process.argv[1]).engines.node' "$root/package.json")"
+
+echo "Building the hub..."
+(cd "$root/apps/hub" && ../../node_modules/.bin/vp pack src/main.ts --no-config -d dist --platform node --target node22 --logLevel error)
+
+echo "Installing on $target..."
+ssh "$target" "mkdir -p /opt/fleet-hub && cat > /opt/fleet-hub/fleet-hub.mjs.new" < "$root/apps/hub/dist/main.mjs"
+ssh "$target" NODE_VERSION="$node_version" PORT="$port" bash -s <<'REMOTE'
+set -euo pipefail
+case "$(uname -m)" in x86_64) arch=x64 ;; aarch64|arm64) arch=arm64 ;; *) echo "unsupported arch" >&2; exit 1 ;; esac
+node_dir="/opt/fleet-hub/node-v${NODE_VERSION}"
+if [ ! -x "$node_dir/bin/node" ]; then
+  echo "Installing Node ${NODE_VERSION}..."
+  tmp="$(mktemp -d)"
+  curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${arch}.tar.xz" -o "$tmp/node.tar.xz"
+  curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt" -o "$tmp/SHASUMS256.txt"
+  (cd "$tmp" && grep " node-v${NODE_VERSION}-linux-${arch}.tar.xz\$" SHASUMS256.txt | sed "s/node-v.*/node.tar.xz/" | sha256sum -c - >/dev/null)
+  mkdir -p "$node_dir"
+  tar -xJf "$tmp/node.tar.xz" -C "$node_dir" --strip-components=1
+  rm -rf "$tmp"
+fi
+mv /opt/fleet-hub/fleet-hub.mjs.new /opt/fleet-hub/fleet-hub.mjs
+cat > /usr/local/bin/fleet-hub <<WRAP
+#!/bin/sh
+export FLEET_HUB_HOME="\${FLEET_HUB_HOME:-/var/lib/fleet-hub}"
+exec $node_dir/bin/node /opt/fleet-hub/fleet-hub.mjs "\$@"
+WRAP
+chmod 755 /usr/local/bin/fleet-hub
+install -d -m 700 /var/lib/fleet-hub
+cat > /etc/systemd/system/fleet-hub.service <<UNIT
+[Unit]
+Description=Fleet hub
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Environment=FLEET_HUB_HOME=/var/lib/fleet-hub
+Environment=FLEET_HUB_PORT=${PORT}
+ExecStart=/usr/local/bin/fleet-hub serve
+Restart=always
+RestartSec=3
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now fleet-hub >/dev/null 2>&1
+systemctl reset-failed fleet-hub 2>/dev/null || true
+systemctl restart fleet-hub
+for _ in $(seq 1 20); do curl -sf "http://127.0.0.1:${PORT}/healthz" >/dev/null && break; sleep 0.5; done
+curl -sf "http://127.0.0.1:${PORT}/healthz" >/dev/null || { journalctl -u fleet-hub -n 20 --no-pager; exit 1; }
+echo "fleet-hub is running on port ${PORT}."
+echo "Hub SSH public key (add it to hosts the hub should scan):"
+fleet-hub pubkey
+REMOTE
