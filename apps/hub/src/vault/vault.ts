@@ -11,6 +11,7 @@ import {
   suite,
 } from "./hpke.ts";
 import { matchLogins, type OpCli, type OpCredential } from "./op.ts";
+import { assertPasskey, createPasskey, type PasskeyRecord } from "./passkeys.ts";
 
 /**
  * The 1Password master password, encrypted with a vault key K the hub never stores.
@@ -19,6 +20,16 @@ import { matchLogins, type OpCli, type OpCredential } from "./op.ts";
  */
 
 const RECORD_KEY = "vault";
+const PASSKEY_PREFIX = "passkey.";
+
+interface StoredPasskey {
+  credentialId: string;
+  rpId: string;
+  userName: string;
+  createdAt: string;
+  /** The full PasskeyRecord, private key included, encrypted with K. */
+  sealed: { iv: string; ct: string; tag: string };
+}
 const wrappedKeyKey = (deviceId: string) => `vault.wrapped.${deviceId}`;
 
 interface VaultRecord {
@@ -32,8 +43,13 @@ interface VaultRecord {
   rotatedAt: string | null;
 }
 
+export type CredentialRequestKind = "login" | "passkey-create" | "passkey-get";
+
 export interface CredentialRequest {
   id: string;
+  kind: CredentialRequestKind;
+  /** What the phone asks, e.g. "Create a passkey for example.com as alice". */
+  title: string;
   url: string;
   requester: string;
   createdAt: number;
@@ -360,6 +376,11 @@ export class Vault {
       rotationPending: false,
       rotatedAt: new Date(this.now()).toISOString(),
     });
+    for (const { key, value } of this.db.listKv(PASSKEY_PREFIX)) {
+      const stored = JSON.parse(value) as StoredPasskey;
+      const plain = decryptPassword(session.key, stored.sealed);
+      this.db.setKv(key, JSON.stringify({ ...stored, sealed: encryptPassword(next, plain) }));
+    }
     session.key.fill(0);
     session.key = next;
     await this.wrapForDevices(next, true);
@@ -420,16 +441,25 @@ export class Vault {
    * Asks the phone to approve one credential use and waits for the answer.
    * Resolves null when denied, timed out or locked.
    */
-  async requestCredential(url: string, requester: string): Promise<OpCredential | null> {
+  /** Waits for the phone's answer to one request: the chosen option id, or null. */
+  private ask(
+    kind: CredentialRequestKind,
+    url: string,
+    requester: string,
+    title: string,
+    options: Array<{ id: string; title: string }>,
+  ) {
     if (!this.record()) throw new VaultError(404, "The vault is not set up.");
     const id = NodeCrypto.randomUUID();
     const decision = new Promise<{ itemId: string } | null>((resolve) => {
       const request = {
         id,
+        kind,
+        title,
         url,
         requester,
         createdAt: this.now(),
-        options: [],
+        options,
         state: "waiting" as const,
         resolve,
       };
@@ -442,12 +472,79 @@ export class Vault {
         }
       }, this.requestTimeoutMs).unref();
     });
-    // Login choices load in the background; the phone sees them on its next poll.
-    void this.refreshOptions(id).catch(() => {});
-    const answer = await decision;
-    this.requests.delete(id);
+    if (kind === "login") void this.refreshOptions(id).catch(() => {});
+    return decision.finally(() => this.requests.delete(id));
+  }
+
+  /** Asks the phone to approve one login fill. Resolves null when denied, timed out or locked. */
+  async requestCredential(url: string, requester: string): Promise<OpCredential | null> {
+    let host = url;
+    try {
+      host = new URL(url).host;
+    } catch {}
+    const answer = await this.ask("login", url, requester, `Sign in to ${host}`, []);
     if (!answer || !this.session) return null;
     return this.op.credential(this.session.opToken, answer.itemId);
+  }
+
+  private storedPasskeys(rpId: string): StoredPasskey[] {
+    return this.db
+      .listKv(PASSKEY_PREFIX)
+      .map(({ value }) => JSON.parse(value) as StoredPasskey)
+      .filter((passkey) => passkey.rpId === rpId);
+  }
+
+  /** Creates a passkey after the phone approves; stored encrypted with the vault key. */
+  async requestPasskeyCreate(input: {
+    origin: string;
+    rpId: string;
+    challenge: string;
+    user: { id: string; name: string; displayName?: string };
+    requester: string;
+  }) {
+    const title = `Create a passkey for ${input.rpId} as ${input.user.name}`;
+    const answer = await this.ask("passkey-create", input.origin, input.requester, title, [
+      { id: "create", title: "Create passkey" },
+    ]);
+    if (!answer || !this.session) return null;
+    const { record, response } = createPasskey(input);
+    const stored: StoredPasskey = {
+      credentialId: record.credentialId,
+      rpId: record.rpId,
+      userName: record.userName,
+      createdAt: record.createdAt,
+      sealed: encryptPassword(this.session.key, JSON.stringify(record)),
+    };
+    this.db.setKv(`${PASSKEY_PREFIX}${record.credentialId}`, JSON.stringify(stored));
+    return response;
+  }
+
+  /** Signs in with a stored passkey the phone picks. */
+  async requestPasskeyGet(input: {
+    origin: string;
+    rpId: string;
+    challenge: string;
+    allowCredentials: string[];
+    requester: string;
+  }) {
+    const candidates = this.storedPasskeys(input.rpId).filter(
+      (passkey) =>
+        input.allowCredentials.length === 0 ||
+        input.allowCredentials.includes(passkey.credentialId),
+    );
+    if (candidates.length === 0) return null;
+    const answer = await this.ask(
+      "passkey-get",
+      input.origin,
+      input.requester,
+      `Sign in to ${input.rpId} with a passkey`,
+      candidates.map((passkey) => ({ id: passkey.credentialId, title: passkey.userName })),
+    );
+    if (!answer || !this.session) return null;
+    const stored = candidates.find((passkey) => passkey.credentialId === answer.itemId);
+    if (!stored) return null;
+    const record = JSON.parse(decryptPassword(this.session.key, stored.sealed)) as PasskeyRecord;
+    return assertPasskey(record, input);
   }
 
   private async loginOptions(url: string) {
@@ -469,7 +566,9 @@ export class Vault {
     }
     if (!this.session || this.session.deviceId !== deviceId)
       throw new VaultError(409, "Unlock the vault on this phone first.");
-    if (request.options.length === 0) request.options = await this.loginOptions(request.url);
+    if (request.kind === "login" && request.options.length === 0) {
+      request.options = await this.loginOptions(request.url);
+    }
     const chosen = itemId ?? (request.options.length === 1 ? request.options[0]!.id : null);
     if (!chosen || !request.options.some((option) => option.id === chosen)) {
       throw new VaultError(

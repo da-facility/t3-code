@@ -510,6 +510,14 @@ export class HubDb {
     return row ? String(row.value) : null;
   }
 
+  listKv(prefix: string): Array<{ key: string; value: string }> {
+    return (
+      this.db
+        .prepare("SELECT key, value FROM kv WHERE key LIKE ? ORDER BY key")
+        .all(`${prefix}%`) as Row[]
+    ).map((row) => ({ key: String(row.key), value: String(row.value) }));
+  }
+
   setKv(key: string, value: string | null) {
     if (value === null) this.db.prepare("DELETE FROM kv WHERE key = ?").run(key);
     else this.db.prepare("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)").run(key, value);

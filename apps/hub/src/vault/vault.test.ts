@@ -215,4 +215,56 @@ describe("vault", () => {
     );
     expect(h.vault.status().unlocked).toBe(false);
   });
+
+  it("creates and uses passkeys after phone approval, surviving a key rotation", async () => {
+    using h = setup();
+    const phone = await makePhone(h.db, "phone");
+    await h.vault.setup(PASSWORD, "my");
+    await phone.unlock(h.vault);
+    const approveNext = async () => {
+      const [request] = h.vault.listRequests();
+      await h.vault.decide(request!.id, phone.id, true, request!.options[0]!.id);
+      return request!;
+    };
+
+    const creating = h.vault.requestPasskeyCreate({
+      origin: "https://login.example.com",
+      rpId: "example.com",
+      challenge: "Y2hhbGxlbmdl",
+      user: { id: "dXNlcg", name: "alice" },
+      requester: "host-a",
+    });
+    expect((await approveNext()).title).toBe("Create a passkey for example.com as alice");
+    const created = (await creating) as { id: string };
+    expect(created.id).toMatch(/^[A-Za-z0-9_-]{43}$/);
+
+    // A revoked tablet forces a rotation; the passkey is re-encrypted with the new key.
+    const tablet = await makePhone(h.db, "tablet");
+    h.db.approveDevice(tablet.id, phone.id);
+    h.vault.onDeviceRevoked(tablet.id);
+    await h.vault.lock("test");
+    await phone.unlock(h.vault);
+
+    const signing = h.vault.requestPasskeyGet({
+      origin: "https://login.example.com",
+      rpId: "example.com",
+      challenge: "bG9naW4",
+      allowCredentials: [],
+      requester: "host-a",
+    });
+    expect((await approveNext()).options).toEqual([{ id: created.id, title: "alice" }]);
+    const assertion = (await signing) as { id: string; response: { userHandle: string } };
+    expect(assertion.id).toBe(created.id);
+    expect(assertion.response.userHandle).toBe("dXNlcg");
+
+    expect(
+      await h.vault.requestPasskeyGet({
+        origin: "https://other.example.org",
+        rpId: "other.example.org",
+        challenge: "eA",
+        allowCredentials: [],
+        requester: "host-a",
+      }),
+    ).toBeNull();
+  });
 });

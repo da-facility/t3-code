@@ -99,7 +99,7 @@ function makeVault(
         if (device.status !== "approved" || !device.apnsToken) continue;
         void push(device.apnsToken, device.apnsEnv, {
           title: locked ? "Unlock to sign in" : "Approve sign-in",
-          body: `${request.requester} wants your login for ${new URL(request.url).host}`,
+          body: `${request.requester}: ${request.title}`,
           timeSensitive: true,
           data: { kind: "credential", requestId: request.id },
         });
@@ -168,6 +168,10 @@ async function main(argv: string[]) {
             : null;
         },
         onDeviceRevoked: (deviceId) => vault.onDeviceRevoked(deviceId),
+        passkeys: {
+          create: (input) => vault.requestPasskeyCreate(input),
+          get: (input) => vault.requestPasskeyGet(input),
+        },
         adminRoutes: async (path, body) => {
           const input = body as { url?: string };
           if (path === "/admin/vault/status") return vault.status();

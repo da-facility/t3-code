@@ -3,6 +3,7 @@ import * as NodeHttp from "node:http";
 import type { Device, HubDb } from "./db.ts";
 import { type Fleet, PROXIED_TOOLS, ToolCallError } from "./fleet.ts";
 import { handleFleetMcp } from "./fleetMcp.ts";
+import { rpIdAllowed } from "./vault/passkeys.ts";
 import type { PushFn } from "./watcher.ts";
 
 /**
@@ -23,6 +24,23 @@ export interface HubHttpOptions {
     requester: string,
   ) => Promise<{ username: string | null; password: string | null; title: string } | null>;
   onDeviceRevoked?: (deviceId: string) => void;
+  /** WebAuthn for the server browser, approved on the phone; null when refused. */
+  passkeys?: {
+    create: (input: {
+      origin: string;
+      rpId: string;
+      challenge: string;
+      user: { id: string; name: string; displayName?: string };
+      requester: string;
+    }) => Promise<unknown>;
+    get: (input: {
+      origin: string;
+      rpId: string;
+      challenge: string;
+      allowCredentials: string[];
+      requester: string;
+    }) => Promise<unknown>;
+  };
   /** Loopback-only operator routes for the hub CLI (vault lock, test requests). */
   adminRoutes?: (path: string, body: unknown) => Promise<unknown>;
 }
@@ -250,6 +268,60 @@ export function createHubServer(options: HubHttpOptions) {
           return send(404, { error: "Not found" });
         }
         return send(200, await options.adminRoutes(url.pathname, await readBody(request)));
+      }
+
+      if (
+        (url.pathname === "/passkeys/create" || url.pathname === "/passkeys/get") &&
+        method === "POST"
+      ) {
+        const token = bearer(request);
+        const caller = token ? db.verifyToken(token) : null;
+        if (!caller) return send(401, { error: "A fleet token is required." });
+        if (!options.passkeys) return send(503, { error: "The vault is not available." });
+        const body = (await readBody(request)) as {
+          origin?: unknown;
+          rpId?: unknown;
+          challenge?: unknown;
+          user?: { id?: unknown; name?: unknown; displayName?: unknown };
+          allowCredentials?: unknown;
+        };
+        if (typeof body.origin !== "string" || typeof body.challenge !== "string") {
+          return send(400, { error: "Expected origin and challenge." });
+        }
+        const origin = body.origin;
+        const rpId =
+          typeof body.rpId === "string" && body.rpId ? body.rpId : new URL(origin).hostname;
+        if (!rpIdAllowed(rpId, origin))
+          return send(403, { error: "The relying party does not match the page." });
+        const requester = caller.serverId ?? caller.label;
+        const result =
+          url.pathname === "/passkeys/create"
+            ? typeof body.user?.id === "string" && typeof body.user.name === "string"
+              ? await options.passkeys.create({
+                  origin,
+                  rpId,
+                  challenge: body.challenge,
+                  user: {
+                    id: body.user.id,
+                    name: body.user.name,
+                    ...(typeof body.user.displayName === "string"
+                      ? { displayName: body.user.displayName }
+                      : {}),
+                  },
+                  requester,
+                })
+              : undefined
+            : await options.passkeys.get({
+                origin,
+                rpId,
+                challenge: body.challenge,
+                allowCredentials: Array.isArray(body.allowCredentials)
+                  ? body.allowCredentials.filter((id): id is string => typeof id === "string")
+                  : [],
+                requester,
+              });
+        if (result === undefined) return send(400, { error: "Expected user.id and user.name." });
+        return result ? send(200, result) : send(403, { error: "Not approved on the phone." });
       }
 
       if (url.pathname === "/credentials" && method === "POST") {

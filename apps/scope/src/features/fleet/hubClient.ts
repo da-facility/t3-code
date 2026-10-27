@@ -24,10 +24,11 @@ const emit = () => {
 
 export async function loadHubLink(): Promise<HubLink | null> {
   if (current !== undefined) return current;
-  const raw = await SecureStore.getItemAsync(STORAGE_KEY);
   try {
+    const raw = await SecureStore.getItemAsync(STORAGE_KEY);
     current = raw ? (JSON.parse(raw) as HubLink) : null;
   } catch {
+    // An unreadable Keychain entry means not connected; enrolling again replaces it.
     current = null;
   }
   emit();
