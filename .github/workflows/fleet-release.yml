@@ -5,6 +5,8 @@ name: Fleet release
 #   <base>/v<version>/SHA256SUMS
 #   <base>/v<version>/t3-<version>-<os>-<arch>.tar.gz
 # Push a tag like v0.1.3-fleet.1, or run it by hand with a version.
+# Linux archives publish the release; the macOS archive attaches itself when
+# its runner finishes, so a slow macOS queue never holds back Linux hosts.
 
 on:
   push:
@@ -18,10 +20,6 @@ on:
 
 permissions:
   contents: write
-
-concurrency:
-  group: fleet-release-${{ github.ref }}
-  cancel-in-progress: false
 
 jobs:
   version:
@@ -41,7 +39,7 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-  build:
+  linux:
     name: Build ${{ matrix.key }}
     needs: version
     runs-on: ${{ matrix.runner }}
@@ -52,22 +50,12 @@ jobs:
         include:
           - key: linux-x64
             runner: ubuntu-24.04
-            platform: linux
             arch: x64
             rust_target: x86_64-unknown-linux-gnu
           - key: linux-arm64
             runner: ubuntu-24.04-arm
-            platform: linux
             arch: arm64
             rust_target: aarch64-unknown-linux-gnu
-          - key: darwin-arm64
-            runner: macos-latest
-            platform: mac
-            arch: arm64
-            rust_target: aarch64-apple-darwin
-    env:
-      VERSION: ${{ needs.version.outputs.version }}
-      T3CODE_TELEMETRY_CHANNEL: dev
     steps:
       - uses: actions/checkout@v6
         with:
@@ -75,66 +63,21 @@ jobs:
             /*
             !/.repos/
           sparse-checkout-cone-mode: false
-
-      - uses: voidzero-dev/setup-vp@v1
+      - uses: ./.github/actions/fleet-build-cli
         with:
-          node-version-file: package.json
-          cache: true
-          run-install: false
-
-      - name: Install dependencies
-        run: vp install --filter=t3... --filter=@t3tools/web... --filter=@t3tools/scripts...
-
-      - name: Align package versions
-        run: node scripts/update-release-package-versions.ts "$VERSION"
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust_target }}
-
-      - name: Build resource monitor
-        run: cargo build --locked --release --manifest-path native/resource-monitor/Cargo.toml --target "${{ matrix.rust_target }}"
-
-      - name: Build server and web client
-        run: vp run --filter t3 build
-
-      - name: Apply web client branding
-        run: node scripts/apply-web-brand-assets.ts production apps/server/dist/client
-
-      - name: Build CLI single-executable
-        run: node apps/server/scripts/cli.ts build-exe --verbose
-
-      - name: Stage resource monitor
-        shell: bash
-        run: |
-          set -euo pipefail
-          dir="$RUNNER_TEMP/cli-resource-monitor/${{ matrix.key }}"
-          mkdir -p "$dir"
-          cp "native/resource-monitor/target/${{ matrix.rust_target }}/release/t3-resource-monitor" "$dir/"
-
-      - name: Build CLI archive
-        run: >-
-          node scripts/build-cli-archive.ts
-          --platform "${{ matrix.platform }}"
-          --arch "${{ matrix.arch }}"
-          --version "$VERSION"
-          --resource-monitor-dir "$RUNNER_TEMP/cli-resource-monitor"
-          --output-dir release-cli
-
-      - name: Smoke-test CLI archive
-        shell: bash
-        run: node scripts/smoke-cli-archive.ts --archive release-cli/* --expect-version "$VERSION"
-
+          version: ${{ needs.version.outputs.version }}
+          key: ${{ matrix.key }}
+          platform: linux
+          arch: ${{ matrix.arch }}
+          rust_target: ${{ matrix.rust_target }}
       - uses: actions/upload-artifact@v7
         with:
           name: cli-${{ matrix.key }}
           path: release-cli/*
           if-no-files-found: error
 
-  # Publishes whatever archives built, so a slow or missing macOS runner does
-  # not hold back the Linux hosts; re-run the workflow to attach a late archive.
   release:
-    needs: [version, build]
+    needs: [version, linux]
     if: ${{ !cancelled() && needs.version.result == 'success' }}
     runs-on: ubuntu-24.04
     env:
@@ -146,20 +89,57 @@ jobs:
           pattern: cli-*
           merge-multiple: true
           path: release-cli
-
-      - name: Checksums
-        working-directory: release-cli
-        run: sha256sum t3-*.tar.gz > SHA256SUMS && cat SHA256SUMS
-
       - name: Publish GitHub release
         shell: bash
         run: |
           set -euo pipefail
+          cd release-cli
+          ls t3-*.tar.gz >/dev/null
           tag="v$VERSION"
           if gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$tag" release-cli/* --clobber -R "$GITHUB_REPOSITORY"
+            gh release download "$tag" -R "$GITHUB_REPOSITORY" -p SHA256SUMS -D existing || true
+            gh release upload "$tag" t3-*.tar.gz --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$tag" release-cli/* -R "$GITHUB_REPOSITORY" \
+            gh release create "$tag" t3-*.tar.gz -R "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" --title "t3 $VERSION (fleet)" --prerelease \
               --notes "Fleet build of t3 $VERSION. Install with scripts/fleet/install."
           fi
+          { cat existing/SHA256SUMS 2>/dev/null || true; sha256sum t3-*.tar.gz; } |
+            awk '{ sums[$2] = $1 } END { for (f in sums) print sums[f] "  " f }' | sort -k2 > SHA256SUMS
+          cat SHA256SUMS
+          gh release upload "$tag" SHA256SUMS --clobber -R "$GITHUB_REPOSITORY"
+
+  darwin:
+    name: Build darwin-arm64
+    needs: version
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+      - uses: ./.github/actions/fleet-build-cli
+        with:
+          version: ${{ needs.version.outputs.version }}
+          key: darwin-arm64
+          platform: mac
+          arch: arm64
+          rust_target: aarch64-apple-darwin
+      - name: Attach to the release
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v$VERSION"
+          for _ in $(seq 1 60); do gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break; sleep 30; done
+          cd release-cli
+          gh release upload "$tag" t3-*.tar.gz --clobber -R "$GITHUB_REPOSITORY"
+          gh release download "$tag" -R "$GITHUB_REPOSITORY" -p SHA256SUMS -D existing || true
+          { cat existing/SHA256SUMS 2>/dev/null || true; shasum -a 256 t3-*.tar.gz; } |
+            awk '{ sums[$2] = $1 } END { for (f in sums) print sums[f] "  " f }' | sort -k2 > SHA256SUMS
+          gh release upload "$tag" SHA256SUMS --clobber -R "$GITHUB_REPOSITORY"

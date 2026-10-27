@@ -1,0 +1,73 @@
+name: Build fleet t3 CLI archive
+description: Builds the self-contained t3 CLI archive for this runner's platform into release-cli/.
+inputs:
+  version:
+    required: true
+  key:
+    description: Archive platform key, e.g. linux-x64
+    required: true
+  platform:
+    description: linux or mac
+    required: true
+  arch:
+    required: true
+  rust_target:
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: voidzero-dev/setup-vp@v1
+      with:
+        node-version-file: package.json
+        cache: true
+        run-install: false
+
+    - name: Install dependencies
+      shell: bash
+      run: vp install --filter=t3... --filter=@t3tools/web... --filter=@t3tools/scripts...
+
+    - name: Align package versions
+      shell: bash
+      run: node scripts/update-release-package-versions.ts "${{ inputs.version }}"
+
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ inputs.rust_target }}
+
+    - name: Build resource monitor
+      shell: bash
+      run: cargo build --locked --release --manifest-path native/resource-monitor/Cargo.toml --target "${{ inputs.rust_target }}"
+
+    - name: Build server and web client
+      shell: bash
+      env:
+        T3CODE_TELEMETRY_CHANNEL: dev
+      run: vp run --filter t3 build
+
+    - name: Apply web client branding
+      shell: bash
+      run: node scripts/apply-web-brand-assets.ts production apps/server/dist/client
+
+    - name: Build CLI single-executable
+      shell: bash
+      env:
+        T3CODE_TELEMETRY_CHANNEL: dev
+      run: node apps/server/scripts/cli.ts build-exe --verbose
+
+    - name: Build CLI archive
+      shell: bash
+      run: |
+        set -euo pipefail
+        dir="$RUNNER_TEMP/cli-resource-monitor/${{ inputs.key }}"
+        mkdir -p "$dir"
+        cp "native/resource-monitor/target/${{ inputs.rust_target }}/release/t3-resource-monitor" "$dir/"
+        node scripts/build-cli-archive.ts \
+          --platform "${{ inputs.platform }}" \
+          --arch "${{ inputs.arch }}" \
+          --version "${{ inputs.version }}" \
+          --resource-monitor-dir "$RUNNER_TEMP/cli-resource-monitor" \
+          --output-dir release-cli
+
+    - name: Smoke-test CLI archive
+      shell: bash
+      run: node scripts/smoke-cli-archive.ts --archive release-cli/* --expect-version "${{ inputs.version }}"
