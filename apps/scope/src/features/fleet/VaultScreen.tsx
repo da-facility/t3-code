@@ -58,17 +58,11 @@ function VaultApproval({ link }: { readonly link: HubLink }) {
   }, [link]);
 
   const poll = useCallback(async () => {
-    try {
-      const next = unlockedHere.current
-        ? await hubRequest<VaultStatus & { alive: boolean }>(link, "/api/vault/heartbeat", {})
-        : await hubRequest<VaultStatus>(link, "/api/vault");
-      setStatus(next);
-      if (unlockedHere.current && !next.unlockedByThisDevice) unlockedHere.current = false;
-      const list = await hubRequest<{ requests: CredentialRequest[] }>(link, "/api/vault/requests");
-      setRequests(list.requests);
-    } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : String(cause));
-    }
+    const result = await pollVault(link, unlockedHere.current);
+    if ("error" in result) return setMessage(result.error);
+    setStatus(result.status);
+    if (unlockedHere.current && !result.status.unlockedByThisDevice) unlockedHere.current = false;
+    setRequests(result.requests);
   }, [link]);
 
   useFocusEffect(
@@ -87,64 +81,30 @@ function VaultApproval({ link }: { readonly link: HubLink }) {
   );
 
   const registerKey = async () => {
-    if (!scopeVault) return setMessage("This build has no vault module.");
     setBusy(true);
-    try {
-      const publicKey = await scopeVault.ensureKey();
-      setStatus(await hubRequest<VaultStatus>(link, "/api/vault/key", { publicKey }));
-      setMessage(
-        scopeVault.isHardwareBacked()
-          ? "Vault key created in the Secure Enclave."
-          : "Vault key created (software key: no Secure Enclave on this device).",
-      );
-    } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
+    const result = await registerVaultKey(link);
+    setBusy(false);
+    if ("error" in result) return setMessage(result.error);
+    setStatus(result.status);
+    setMessage(result.message);
   };
 
   const unlock = async () => {
-    if (!scopeVault) return setMessage("This build has no vault module.");
     setBusy(true);
     setMessage(null);
-    try {
-      const challenge = await hubRequest<{
-        challengeId: string;
-        publicKey: string;
-        wrappedKey: { enc: string; ct: string };
-      }>(link, "/api/vault/unlock/start", {});
-      const sealedKey = await scopeVault.unlock(
-        link.deviceId,
-        challenge.wrappedKey.enc,
-        challenge.wrappedKey.ct,
-        challenge.publicKey,
-        challenge.challengeId,
-        "Unlock your 1Password vault on the hub",
-      );
-      const next = await hubRequest<VaultStatus>(link, "/api/vault/unlock/finish", {
-        challengeId: challenge.challengeId,
-        sealedKey,
-      });
-      unlockedHere.current = next.unlockedByThisDevice;
-      setStatus(next);
-    } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
+    const result = await unlockVault(link);
+    setBusy(false);
+    if ("error" in result) return setMessage(result.error);
+    unlockedHere.current = result.status.unlockedByThisDevice;
+    setStatus(result.status);
   };
 
-  const decide = async (request: CredentialRequest, approve: boolean, itemId?: string) => {
-    try {
-      await hubRequest(link, `/api/vault/requests/${request.id}`, {
-        approve,
-        ...(itemId ? { itemId } : {}),
-      });
-      setRequests((current) => current.filter((candidate) => candidate.id !== request.id));
-    } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : String(cause));
-    }
+  const decide = (request: CredentialRequest, approve: boolean, itemId?: string) => {
+    const body = itemId ? { approve, itemId } : { approve };
+    void hubRequest(link, `/api/vault/requests/${request.id}`, body).then(
+      () => setRequests((current) => current.filter((candidate) => candidate.id !== request.id)),
+      (cause: unknown) => setMessage(describe(cause)),
+    );
   };
 
   const host = (url: string) => {
@@ -239,7 +199,7 @@ function VaultApproval({ link }: { readonly link: HubLink }) {
             </Text>
           ) : (
             request.options.map((option) => (
-              <Pressable key={option.id} onPress={() => void decide(request, true, option.id)}>
+              <Pressable key={option.id} onPress={() => decide(request, true, option.id)}>
                 <GlassSurface style={{ padding: 12 }}>
                   <Text className="text-base font-t3-medium text-foreground">
                     Use “{option.title}”
@@ -248,9 +208,74 @@ function VaultApproval({ link }: { readonly link: HubLink }) {
               </Pressable>
             ))
           )}
-          <Button label="Deny" tone="danger" onPress={() => void decide(request, false)} />
+          <Button label="Deny" tone="danger" onPress={() => decide(request, false)} />
         </GlassSurface>
       ))}
     </ScrollView>
   );
+}
+
+const describe = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
+
+// Async work lives outside components: React Compiler cannot compile try/finally in them.
+
+async function registerVaultKey(
+  link: HubLink,
+): Promise<{ status: VaultStatus; message: string } | { error: string }> {
+  if (!scopeVault) return { error: "This build has no vault module." };
+  try {
+    const publicKey = await scopeVault.ensureKey();
+    const status = await hubRequest<VaultStatus>(link, "/api/vault/key", { publicKey });
+    return {
+      status,
+      message: scopeVault.isHardwareBacked()
+        ? "Vault key created in the Secure Enclave."
+        : "Vault key created (software key: no Secure Enclave on this device).",
+    };
+  } catch (cause) {
+    return { error: describe(cause) };
+  }
+}
+
+/** Face ID opens this phone's wrapped vault key and seals it to the hub's one-time key. */
+async function unlockVault(link: HubLink): Promise<{ status: VaultStatus } | { error: string }> {
+  if (!scopeVault) return { error: "This build has no vault module." };
+  try {
+    const challenge = await hubRequest<{
+      challengeId: string;
+      publicKey: string;
+      wrappedKey: { enc: string; ct: string };
+    }>(link, "/api/vault/unlock/start", {});
+    const sealedKey = await scopeVault.unlock(
+      link.deviceId,
+      challenge.wrappedKey.enc,
+      challenge.wrappedKey.ct,
+      challenge.publicKey,
+      challenge.challengeId,
+      "Unlock your 1Password vault on the hub",
+    );
+    const status = await hubRequest<VaultStatus>(link, "/api/vault/unlock/finish", {
+      challengeId: challenge.challengeId,
+      sealedKey,
+    });
+    return { status };
+  } catch (cause) {
+    return { error: describe(cause) };
+  }
+}
+
+/** Status (a heartbeat while this phone holds the unlock) and the waiting requests. */
+async function pollVault(
+  link: HubLink,
+  unlockedHere: boolean,
+): Promise<{ status: VaultStatus; requests: CredentialRequest[] } | { error: string }> {
+  try {
+    const status = unlockedHere
+      ? await hubRequest<VaultStatus>(link, "/api/vault/heartbeat", {})
+      : await hubRequest<VaultStatus>(link, "/api/vault");
+    const list = await hubRequest<{ requests: CredentialRequest[] }>(link, "/api/vault/requests");
+    return { status, requests: list.requests };
+  } catch (cause) {
+    return { error: describe(cause) };
+  }
 }

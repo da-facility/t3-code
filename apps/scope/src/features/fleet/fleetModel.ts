@@ -120,7 +120,7 @@ export function summarizeFleet(
         error: overview?.error ?? server.t3.lastError,
       };
     })
-    .toSorted(
+    .sort(
       (a, b) =>
         b.waiting - a.waiting || b.running - a.running || a.server.id.localeCompare(b.server.id),
     );
@@ -144,10 +144,10 @@ export function summarizeFleet(
 
   return {
     servers: rows,
-    attention: attention.toSorted(byUpdatedDesc),
+    attention: attention.sort(byUpdatedDesc),
     recent: allThreads
       .filter((thread) => thread.status !== "waiting")
-      .toSorted(byUpdatedDesc)
+      .sort(byUpdatedDesc)
       .slice(0, recentLimit),
   };
 }

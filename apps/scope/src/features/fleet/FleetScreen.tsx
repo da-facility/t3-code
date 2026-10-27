@@ -1,4 +1,4 @@
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { EnvironmentId } from "@t3tools/contracts";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
@@ -65,21 +65,9 @@ function HubSetup() {
     }
     setBusy(true);
     setError(null);
-    try {
-      const device = await enrollWithHub(normalized, name.trim() || "iPhone");
-      // The owner is approved at once and registers its vault key now; others do it after approval.
-      if (device.status === "approved" && scopeVault) {
-        const publicKey = await scopeVault.ensureKey();
-        const token = (await loadHubLink())!.token;
-        await hubRequest({ url: normalized, token }, "/api/vault/key", { publicKey }).catch(
-          () => {},
-        );
-      }
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
+    const failure = await enrollAndRegisterKey(normalized, name.trim() || "iPhone");
+    setError(failure);
+    setBusy(false);
   };
 
   return (
@@ -141,32 +129,11 @@ function useFleetData(link: HubLink) {
 
   const load = useCallback(
     async (refresh: boolean) => {
-      try {
-        const { device } = await hubRequest<{ device: HubDevice }>(link, "/api/me");
-        if (device.status !== "approved") {
-          setData({ fetchedAt: Date.now(), device, servers: [], overviews: [], devices: [] });
-          setError(null);
-          return;
-        }
-        const [servers, overview, devices] = await Promise.all([
-          hubRequest<{ servers: HubServer[] }>(link, "/api/servers"),
-          hubRequest<{ servers: HubOverview[] }>(
-            link,
-            `/api/overview${refresh ? "?refresh=1" : ""}`,
-          ),
-          hubRequest<{ devices: HubDevice[] }>(link, "/api/devices"),
-        ]);
-        setData({
-          fetchedAt: Date.now(),
-          device,
-          servers: servers.servers,
-          overviews: overview.servers,
-          devices: devices.devices,
-        });
+      const result = await fetchFleet(link, refresh);
+      if ("error" in result) setError(result.error);
+      else {
+        setData(result.data);
         setError(null);
-      } catch (cause) {
-        const status = (cause as { status?: number }).status ?? 0;
-        setError({ status, message: cause instanceof Error ? cause.message : String(cause) });
       }
     },
     [link],
@@ -211,30 +178,10 @@ function FleetDashboard({ link }: { readonly link: HubLink }) {
     async (row: FleetServerRow): Promise<boolean> => {
       if (row.environmentId && connectedIds.has(row.environmentId)) return true;
       setConnecting(row.server.id);
-      try {
-        const pairing = await hubRequest<{ pairingUrl: string }>(
-          link,
-          `/api/servers/${row.server.id}/pairing`,
-          {},
-        );
-        const result = await connectPairingUrl(
-          pairing.pairingUrl,
-          (row.environmentId ?? undefined) as EnvironmentId | undefined,
-        );
-        if (AsyncResult.isFailure(result)) {
-          Dialog.alert(
-            "Could not connect",
-            `Scope could not reach ${row.server.id} directly. Is Tailscale on?`,
-          );
-          return false;
-        }
-        return true;
-      } catch (cause) {
-        Dialog.alert("Could not connect", cause instanceof Error ? cause.message : String(cause));
-        return false;
-      } finally {
-        setConnecting(null);
-      }
+      const failure = await pairThroughHub(link, row, connectPairingUrl);
+      setConnecting(null);
+      if (failure) Dialog.alert("Could not connect", failure);
+      return failure === null;
     },
     [connectPairingUrl, connectedIds, link],
   );
@@ -244,10 +191,12 @@ function FleetDashboard({ link }: { readonly link: HubLink }) {
       const row = summary?.servers.find((candidate) => candidate.server.id === thread.serverId);
       if (!row?.environmentId) return;
       if (!(await ensureConnected(row))) return;
-      navigation.navigate("Thread", {
-        environmentId: row.environmentId,
-        threadId: thread.threadId,
-      } as never);
+      navigation.dispatch(
+        StackActions.push("Thread", {
+          environmentId: row.environmentId,
+          threadId: thread.threadId,
+        }),
+      );
     },
     [ensureConnected, navigation, summary],
   );
@@ -278,24 +227,22 @@ function FleetDashboard({ link }: { readonly link: HubLink }) {
     return () => subscription.remove();
   }, [navigation, openThread, summary]);
 
-  const enablePush = async () => {
-    try {
-      const result = await registerPushWithHub(link);
-      setPushState(
-        result === "registered" ? "Push is on for this phone." : `Push not enabled (${result}).`,
-      );
-    } catch (cause) {
-      setPushState(cause instanceof Error ? cause.message : String(cause));
-    }
+  const enablePush = () => {
+    void registerPushWithHub(link).then(
+      (result) =>
+        setPushState(
+          result === "registered" ? "Push is on for this phone." : `Push not enabled (${result}).`,
+        ),
+      (cause: unknown) => setPushState(describe(cause)),
+    );
   };
 
-  const testPush = async () => {
-    try {
-      const result = await sendTestPush(link);
-      setPushState(result.ok ? "Test push sent." : `Push failed: ${result.reason ?? "unknown"}`);
-    } catch (cause) {
-      setPushState(cause instanceof Error ? cause.message : String(cause));
-    }
+  const testPush = () => {
+    void sendTestPush(link).then(
+      (result) =>
+        setPushState(result.ok ? "Test push sent." : `Push failed: ${result.reason ?? "unknown"}`),
+      (cause: unknown) => setPushState(describe(cause)),
+    );
   };
 
   const disconnect = () =>
@@ -437,8 +384,8 @@ function FleetDashboard({ link }: { readonly link: HubLink }) {
       <Section title="This phone">
         <GlassSurface style={{ padding: 14, gap: 10 }}>
           <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
-            <Button label="Enable push" tone="secondary" onPress={() => void enablePush()} />
-            <Button label="Test push" tone="secondary" onPress={() => void testPush()} />
+            <Button label="Enable push" tone="secondary" onPress={enablePush} />
+            <Button label="Test push" tone="secondary" onPress={testPush} />
             <Button label="Disconnect" tone="danger" onPress={disconnect} />
           </View>
           {pushState ? <Text className="text-sm text-muted-foreground">{pushState}</Text> : null}
@@ -603,4 +550,81 @@ function CenteredMessage(props: {
       </GlassSurface>
     </View>
   );
+}
+
+const describe = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
+
+// Async work lives outside components: React Compiler cannot compile try/finally in them.
+
+/** Enrolls, and registers the vault key at once when this phone became the owner. */
+async function enrollAndRegisterKey(url: string, name: string): Promise<string | null> {
+  try {
+    const device = await enrollWithHub(url, name);
+    // Later phones register their key from the Vault screen once approved.
+    if (device.status === "approved" && scopeVault) {
+      const publicKey = await scopeVault.ensureKey();
+      const link = await loadHubLink();
+      if (link) await hubRequest(link, "/api/vault/key", { publicKey }).catch(() => {});
+    }
+    return null;
+  } catch (cause) {
+    return describe(cause);
+  }
+}
+
+async function fetchFleet(
+  link: HubLink,
+  refresh: boolean,
+): Promise<{ data: FleetData } | { error: { status: number; message: string } }> {
+  try {
+    const { device } = await hubRequest<{ device: HubDevice }>(link, "/api/me");
+    if (device.status !== "approved") {
+      return { data: { fetchedAt: Date.now(), device, servers: [], overviews: [], devices: [] } };
+    }
+    const [servers, overview, devices] = await Promise.all([
+      hubRequest<{ servers: HubServer[] }>(link, "/api/servers"),
+      hubRequest<{ servers: HubOverview[] }>(link, `/api/overview${refresh ? "?refresh=1" : ""}`),
+      hubRequest<{ devices: HubDevice[] }>(link, "/api/devices"),
+    ]);
+    return {
+      data: {
+        fetchedAt: Date.now(),
+        device,
+        servers: servers.servers,
+        overviews: overview.servers,
+        devices: devices.devices,
+      },
+    };
+  } catch (cause) {
+    return {
+      error: { status: (cause as { status?: number }).status ?? 0, message: describe(cause) },
+    };
+  }
+}
+
+/** Pairs this phone with a server through a hub-minted link. Returns an error message or null. */
+async function pairThroughHub(
+  link: HubLink,
+  row: FleetServerRow,
+  connect: (
+    pairingUrl: string,
+    expected?: EnvironmentId,
+  ) => Promise<AsyncResult.AsyncResult<unknown, unknown>>,
+): Promise<string | null> {
+  try {
+    const pairing = await hubRequest<{ pairingUrl: string }>(
+      link,
+      `/api/servers/${row.server.id}/pairing`,
+      {},
+    );
+    const result = await connect(
+      pairing.pairingUrl,
+      (row.environmentId ?? undefined) as EnvironmentId | undefined,
+    );
+    return AsyncResult.isFailure(result)
+      ? `Scope could not reach ${row.server.id} directly. Is Tailscale on?`
+      : null;
+  } catch (cause) {
+    return describe(cause);
+  }
 }

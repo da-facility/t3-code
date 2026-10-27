@@ -16,8 +16,19 @@ describe("hasCloudPublicConfig", () => {
     expect(hasCloudPublicConfig()).toBe(false);
   });
 
+  it("stays off in the fork even with a complete production config", () => {
+    vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", `pk_live_${btoa("clerk.example.com$")}`);
+    vi.stubEnv("VITE_CLERK_JWT_TEMPLATE", "t3-relay");
+    vi.stubEnv("VITE_T3CODE_RELAY_URL", "https://relay.example.test");
+    vi.stubGlobal("window", { location: new URL("https://example.com") });
+
+    expect(hasCloudPublicConfig()).toBe(false);
+  });
+
   describe("browser origins", () => {
     beforeEach(() => {
+      // Upstream's origin rules, exercised through the fork's debug switch.
+      vi.stubEnv("VITE_T3CODE_FLEET_ENABLE_CONNECT", "1");
       vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", `pk_live_${btoa("clerk.example.com$")}`);
       vi.stubEnv("VITE_CLERK_JWT_TEMPLATE", "t3-relay");
       vi.stubEnv("VITE_T3CODE_RELAY_URL", "https://relay.example.test");
