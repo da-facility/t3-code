@@ -10,6 +10,7 @@ import { ApnsSender } from "./apns.ts";
 import { MetaserverDb } from "./db.ts";
 import { Fleet } from "./fleet.ts";
 import { createMetaserverHttpServer } from "./http.ts";
+import { relayConfigFromEnv, syncRelay } from "./relay.ts";
 import { scanServer } from "./scanner.ts";
 import { OpCli } from "./vault/op.ts";
 import { vaultRoutes } from "./vault/routes.ts";
@@ -40,6 +41,9 @@ const USAGE = `t3-metaserver <command>
 Environment: T3_METASERVER_HOME (default /var/lib/t3-metaserver), T3_METASERVER_HOST,
 T3_METASERVER_PORT (8780), T3_METASERVER_OP_BIN (default op), T3_METASERVER_OP_ACCOUNT
 (op account shorthand).
+Relay: T3_METASERVER_PUBLIC_HOST (the metaserver's tailnet name; unset = relay off),
+T3_METASERVER_RELAY_PORT_BASE (9001), T3_METASERVER_CADDY_RELAYS
+(/etc/caddy/t3-relays.caddy), T3_METASERVER_CADDY_RELOAD (systemctl reload caddy).
 APNs: put {"keyPath","keyId","teamId","topic"} in $T3_METASERVER_HOME/apns.json.`;
 
 const home = process.env.T3_METASERVER_HOME ?? "/var/lib/t3-metaserver";
@@ -63,6 +67,14 @@ function openDb() {
   const db = new MetaserverDb(paths.db);
   NodeFS.chmodSync(paths.db, 0o600);
   return db;
+}
+
+const relay = relayConfigFromEnv();
+const newFleet = (db: MetaserverDb) => new Fleet(db, fetch, relay?.publicHost ?? null);
+
+/** Commands that change links run outside `serve`, so each rewrites the Caddy relay file itself. */
+async function syncRelayFor(db: MetaserverDb) {
+  if (relay) await syncRelay(db, relay);
 }
 
 const readStdin = () => NodeFS.readFileSync(0, "utf8");
@@ -157,7 +169,8 @@ async function main(argv: string[]) {
     case "serve": {
       const db = openDb();
       ensureSshKey();
-      const fleet = new Fleet(db);
+      await syncRelayFor(db);
+      const fleet = newFleet(db);
       const push = loadPush();
       const watcher = new Watcher(db, fleet, push ?? (async () => ({ ok: true })));
       const vault = makeVault(db, push);
@@ -210,7 +223,9 @@ async function main(argv: string[]) {
       const host = process.env.T3_METASERVER_HOST ?? "0.0.0.0";
       const port = Number(process.env.T3_METASERVER_PORT ?? 8780);
       server.listen(port, host, () => {
-        console.log(`t3-metaserver listening on ${host}:${port} (push ${push ? "on" : "off"})`);
+        console.log(
+          `t3-metaserver listening on ${host}:${port} (push ${push ? "on" : "off"}, relay ${relay ? relay.publicHost : "off"})`,
+        );
       });
       watcher.start(Number(process.env.T3_METASERVER_POLL_MS ?? 15_000));
       const shutdown = () => {
@@ -241,7 +256,13 @@ async function main(argv: string[]) {
           ...(values["t3-url"] !== undefined ? { t3Url: values["t3-url"] } : {}),
           sources: ["manual"],
         };
-        return print(db.upsertServer(input));
+        const server = db.upsertServer(input);
+        const link = db.getLink(id);
+        if (link && server.t3Url && server.t3Url !== link.t3Url) {
+          db.setLinkUrl(id, server.t3Url);
+          await syncRelayFor(db);
+        }
+        return print(server);
       }
       if (sub === "import") {
         const rows = JSON.parse(readStdin()) as RegistryServerInput[];
@@ -249,7 +270,7 @@ async function main(argv: string[]) {
         return print(`Imported ${rows.length} servers.`);
       }
       if (sub === "list") {
-        const fleet = new Fleet(db);
+        const fleet = newFleet(db);
         const servers = fleet.describeServers();
         if (values.json) return print(servers);
         for (const server of servers) {
@@ -259,8 +280,11 @@ async function main(argv: string[]) {
         }
         return;
       }
-      if (sub === "remove" && id)
-        return print(db.removeServer(id) ? "Removed." : "No such server.");
+      if (sub === "remove" && id) {
+        const removed = db.removeServer(id);
+        if (removed) await syncRelayFor(db);
+        return print(removed ? "Removed." : "No such server.");
+      }
       throw new Error(USAGE);
     }
 
@@ -275,11 +299,13 @@ async function main(argv: string[]) {
       if (!db.getServer(id))
         db.upsertServer({ id, address: new URL(values.url).hostname, sources: ["manual"] });
       db.setLink(id, values.url, credentials.bearer, credentials.mcp);
-      const fleet = new Fleet(db);
+      await syncRelayFor(db);
+      const fleet = newFleet(db);
       const environment = await fleet.verifyLink(id);
       return print({
         linked: id,
         url: values.url,
+        relayUrl: fleet.relayUrl(db.getLink(id)!),
         environmentId: environment.environmentId,
         serverVersion: environment.serverVersion,
       });
@@ -288,7 +314,9 @@ async function main(argv: string[]) {
     case "unlink": {
       const [id] = positionals;
       const db = openDb();
-      return print(id && db.removeLink(id) ? "Unlinked." : "No such link.");
+      const removed = id ? db.removeLink(id) : false;
+      if (removed) await syncRelayFor(db);
+      return print(removed ? "Unlinked." : "No such link.");
     }
 
     case "token": {
@@ -342,7 +370,7 @@ async function main(argv: string[]) {
 
     case "overview": {
       const db = openDb();
-      const overviews = await new Fleet(db).overviewAll();
+      const overviews = await newFleet(db).overviewAll();
       if (values.json) return print(overviews);
       for (const overview of overviews) {
         console.log(`${overview.serverId}: ${overview.ok ? "ok" : `error: ${overview.error}`}`);
@@ -395,7 +423,7 @@ async function main(argv: string[]) {
       if (!server || !tool) throw new Error("call <server> <tool> [json-args]");
       const db = openDb();
       return print(
-        await new Fleet(db).call(
+        await newFleet(db).call(
           server,
           tool,
           args ? (JSON.parse(args) as Record<string, unknown>) : {},

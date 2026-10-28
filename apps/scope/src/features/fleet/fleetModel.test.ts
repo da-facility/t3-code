@@ -3,8 +3,12 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   type MetaserverOverview,
   type MetaserverServer,
+  type FleetServerRow,
+  isServerConnected,
   normalizeMetaserverUrl,
   relativeTime,
+  routesOffRelay,
+  serversOffRelay,
   summarizeFleet,
 } from "./fleetModel";
 
@@ -15,6 +19,7 @@ const server = (id: string, linked = true): MetaserverServer => ({
   tags: [],
   serviceCount: 0,
   t3: { url: linked ? `http://${id}:3773` : null, linked, lastOkAt: null, lastError: null },
+  relayUrl: null,
 });
 
 describe("normalizeMetaserverUrl", () => {
@@ -128,6 +133,51 @@ describe("summarizeFleet", () => {
     expect(summary.attention).toEqual([
       expect.objectContaining({ threadId: "t1", summary: "Which region?", requestId: "r1" }),
     ]);
+  });
+});
+
+describe("the metaserver relay", () => {
+  const RELAY = "https://metaserver.example.ts.net:9001";
+  const row = (relayUrl: string | null): FleetServerRow => ({
+    server: { ...server("host-a"), relayUrl },
+    health: "online",
+    environmentId: "env-a",
+    label: "Host A",
+    running: 0,
+    waiting: 0,
+    threads: 0,
+    error: null,
+  });
+  const direct = [{ environmentId: "env-a", displayUrl: "http://host-a:3773/" }];
+  const relayed = [{ environmentId: "env-a", displayUrl: `${RELAY}/` }];
+
+  it("counts a server as connected only through its relay, when it has one", () => {
+    expect(isServerConnected(row(null), direct)).toBe(true);
+    expect(isServerConnected(row(RELAY), direct)).toBe(false);
+    expect(isServerConnected(row(RELAY), relayed)).toBe(true);
+    // Another server's relay port on the same metaserver is a different origin.
+    expect(isServerConnected(row("https://metaserver.example.ts.net:9002"), relayed)).toBe(false);
+    expect(isServerConnected(row(RELAY), [])).toBe(false);
+  });
+
+  it("moves only saved servers that connect elsewhere", () => {
+    const rows = [row(RELAY), { ...row(null), environmentId: "env-b" }];
+    expect(serversOffRelay(rows, direct).map((candidate) => candidate.environmentId)).toEqual([
+      "env-a",
+    ]);
+    expect(serversOffRelay(rows, relayed)).toEqual([]);
+    expect(serversOffRelay(rows, [])).toEqual([]);
+  });
+
+  it("drops paired routes off the relay, but never the last way in", () => {
+    const routes = [
+      { id: "direct", httpBaseUrl: "http://host-a:3773/", learned: false },
+      { id: "relay", httpBaseUrl: `${RELAY}/`, learned: false },
+      { id: "learned", httpBaseUrl: "http://100.64.0.1:3773/", learned: true },
+      { id: "t3-connect", httpBaseUrl: null, learned: false },
+    ];
+    expect(routesOffRelay(routes, RELAY)).toEqual(["direct"]);
+    expect(routesOffRelay([routes[0]!], RELAY)).toEqual([]);
   });
 });
 

@@ -1,9 +1,7 @@
 import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
-import type { EnvironmentId } from "@t3tools/contracts";
 import * as Clipboard from "expo-clipboard";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
-import { AsyncResult } from "effect/reactivity";
 import * as Notifications from "expo-notifications";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, RefreshControl, View } from "react-native";
@@ -23,6 +21,7 @@ import {
   type MetaserverOverview,
   type MetaserverServer,
   type MetaserverThread,
+  isServerConnected,
   normalizeMetaserverUrl,
   summarizeFleet,
 } from "./fleetModel";
@@ -34,11 +33,13 @@ import {
   loadMetaserverLink,
   useMetaserverLink,
 } from "./metaserverClient";
+import { moveServersOntoRelay, pairThroughMetaserver } from "./relayConnection";
 import { scopeVault } from "./vaultNative";
 
 /**
  * The Fleet tab: servers, controllers and the rest of the registry, through the metaserver.
- * Tapping a server pairs this phone with it directly and opens it in the Workspace tab.
+ * Tapping a server pairs this phone with it through the metaserver's relay and opens it
+ * in the Workspace tab.
  */
 export function FleetScreen() {
   const link = useMetaserverLink();
@@ -140,6 +141,7 @@ function useFleetData(link: MetaserverLink) {
       else {
         setData(result.data);
         setError(null);
+        moveServersOntoRelay(link, result.data.servers, result.data.overviews);
       }
     },
     [link],
@@ -167,28 +169,23 @@ function FleetDashboard({ link }: { readonly link: MetaserverLink }) {
   const workspace = useWorkspaceTabs();
   const selectTab = useSelectWorkspaceTab();
   const { data, error, refreshing, refresh } = useFleetData(link);
-  const { connectedEnvironments, connectPairingUrl } = useConnectionController();
+  const { connectedEnvironments } = useConnectionController();
   const [connecting, setConnecting] = useState<string | null>(null);
 
   const summary = useMemo(
     () => (data ? summarizeFleet(data.servers, data.overviews) : null),
     [data],
   );
-  const connectedIds = useMemo(
-    () => new Set(connectedEnvironments.map((environment) => String(environment.environmentId))),
-    [connectedEnvironments],
-  );
-
   const ensureConnected = useCallback(
     async (row: FleetServerRow): Promise<boolean> => {
-      if (row.environmentId && connectedIds.has(row.environmentId)) return true;
+      if (isServerConnected(row, connectedEnvironments)) return true;
       setConnecting(row.server.id);
-      const failure = await pairThroughMetaserver(link, row, connectPairingUrl);
+      const failure = await pairThroughMetaserver(link, row);
       setConnecting(null);
       if (failure) Dialog.alert("Could not connect", failure);
       return failure === null;
     },
-    [connectPairingUrl, connectedIds, link],
+    [connectedEnvironments, link],
   );
 
   const openThread = useCallback(
@@ -284,7 +281,7 @@ function FleetDashboard({ link }: { readonly link: MetaserverLink }) {
             <ServerCard
               key={row.server.id}
               row={row}
-              connected={row.environmentId !== null && connectedIds.has(row.environmentId)}
+              connected={isServerConnected(row, connectedEnvironments)}
               connecting={connecting === row.server.id}
               onPress={() => void openServer(row)}
             />
@@ -521,32 +518,5 @@ async function fetchFleet(
     return {
       error: { status: (cause as { status?: number }).status ?? 0, message: describe(cause) },
     };
-  }
-}
-
-/** Pairs this phone with a server through a metaserver-minted link. Returns an error message or null. */
-async function pairThroughMetaserver(
-  link: MetaserverLink,
-  row: FleetServerRow,
-  connect: (
-    pairingUrl: string,
-    expected?: EnvironmentId,
-  ) => Promise<AsyncResult.AsyncResult<unknown, unknown>>,
-): Promise<string | null> {
-  try {
-    const pairing = await metaserverRequest<{ pairingUrl: string }>(
-      link,
-      `/api/servers/${row.server.id}/pairing`,
-      {},
-    );
-    const result = await connect(
-      pairing.pairingUrl,
-      (row.environmentId ?? undefined) as EnvironmentId | undefined,
-    );
-    return AsyncResult.isFailure(result)
-      ? `Scope could not reach ${row.server.id} directly. Is Tailscale on?`
-      : null;
-  } catch (cause) {
-    return describe(cause);
   }
 }

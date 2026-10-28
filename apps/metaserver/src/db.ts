@@ -76,6 +76,9 @@ const MIGRATIONS = [
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );`,
+  // SQLite cannot add a UNIQUE column, so a unique index carries the constraint.
+  `ALTER TABLE links ADD COLUMN relay_port INTEGER;
+  CREATE UNIQUE INDEX links_relay_port ON links (relay_port);`,
 ];
 
 export const hashToken = (token: string) =>
@@ -92,6 +95,8 @@ export interface Link {
   linkedAt: string;
   lastOkAt: string | null;
   lastError: string | null;
+  /** The metaserver port phones use to reach this server through Caddy. */
+  relayPort: number | null;
 }
 
 export type DeviceRole = "owner" | "member";
@@ -155,6 +160,8 @@ const toLink = (row: Row): Link => ({
   linkedAt: String(row.linked_at),
   lastOkAt: str(row.last_ok_at),
   lastError: str(row.last_error),
+  relayPort:
+    row.relay_port === null || row.relay_port === undefined ? null : Number(row.relay_port),
 });
 
 const toDevice = (row: Row): Device => ({
@@ -334,6 +341,45 @@ export class MetaserverDb {
 
   removeLink(serverId: string) {
     return this.db.prepare("DELETE FROM links WHERE server_id = ?").run(serverId).changes > 0;
+  }
+
+  /** Points an existing link at a new URL, keeping its credentials and relay port. */
+  setLinkUrl(serverId: string, t3Url: string) {
+    this.db.prepare("UPDATE links SET t3_url = ? WHERE server_id = ?").run(t3Url, serverId);
+  }
+
+  /**
+   * Gives every link without a relay port the lowest free port at or above `base`.
+   * A link keeps its port while it exists, so phones' saved connections stay valid.
+   */
+  assignRelayPorts(base: number) {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const used = new Set(
+        (
+          this.db
+            .prepare("SELECT relay_port FROM links WHERE relay_port IS NOT NULL")
+            .all() as Row[]
+        ).map((row) => Number(row.relay_port)),
+      );
+      const waiting = this.db
+        .prepare(
+          "SELECT server_id FROM links WHERE relay_port IS NULL ORDER BY linked_at, server_id",
+        )
+        .all() as Row[];
+      const assign = this.db.prepare("UPDATE links SET relay_port = ? WHERE server_id = ?");
+      let port = base;
+      for (const row of waiting) {
+        while (used.has(port)) port += 1;
+        if (port > 65_535) throw new Error(`No relay port left at or above ${base}.`);
+        assign.run(port, String(row.server_id));
+        used.add(port);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   markLink(serverId: string, error: string | null) {

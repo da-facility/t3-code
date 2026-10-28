@@ -25,6 +25,8 @@ export interface MetaserverServer {
     readonly lastOkAt: string | null;
     readonly lastError: string | null;
   };
+  /** The server's port on the metaserver, which phones connect through; null without the relay. */
+  readonly relayUrl: string | null;
 }
 
 export interface MetaserverThread {
@@ -157,6 +159,72 @@ export function summarizeFleet(
       .slice(0, recentLimit),
     others: servers.filter((server) => !hasT3(server)).sort((a, b) => a.id.localeCompare(b.id)),
   };
+}
+
+const originOf = (url: string) => {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+};
+
+export function usesRelay(httpBaseUrl: string, relayUrl: string): boolean {
+  const relay = originOf(relayUrl);
+  return relay !== null && originOf(httpBaseUrl) === relay;
+}
+
+/** A saved environment on this phone and the address it connects to first. */
+export interface SavedEnvironment {
+  readonly environmentId: string;
+  readonly displayUrl: string;
+}
+
+/** Saved, and through the relay when the server has one; otherwise tapping pairs again. */
+export function isServerConnected(
+  row: FleetServerRow,
+  saved: ReadonlyArray<SavedEnvironment>,
+): boolean {
+  const environment = saved.find((candidate) => candidate.environmentId === row.environmentId);
+  if (environment === undefined) return false;
+  return row.server.relayUrl === null || usesRelay(environment.displayUrl, row.server.relayUrl);
+}
+
+/** Linked servers this phone has saved under another address than their relay. */
+export function serversOffRelay(
+  rows: ReadonlyArray<FleetServerRow>,
+  saved: ReadonlyArray<SavedEnvironment>,
+): ReadonlyArray<FleetServerRow> {
+  return rows.filter(
+    (row) =>
+      row.server.t3.linked &&
+      row.server.relayUrl !== null &&
+      row.environmentId !== null &&
+      saved.some((candidate) => candidate.environmentId === row.environmentId) &&
+      !isServerConnected(row, saved),
+  );
+}
+
+export interface SavedRoute {
+  readonly id: string;
+  readonly httpBaseUrl: string | null;
+  readonly learned: boolean;
+}
+
+/**
+ * Paired routes to drop once the relay route is saved, so the phone stops opening a
+ * Tailscale path to the server. Learned routes go with the route they borrow from.
+ */
+export function routesOffRelay(
+  routes: ReadonlyArray<SavedRoute>,
+  relayUrl: string,
+): ReadonlyArray<string> {
+  const onRelay = (route: SavedRoute) =>
+    route.httpBaseUrl !== null && usesRelay(route.httpBaseUrl, relayUrl);
+  if (!routes.some(onRelay)) return [];
+  return routes
+    .filter((route) => !route.learned && route.httpBaseUrl !== null && !onRelay(route))
+    .map((route) => route.id);
 }
 
 export function relativeTime(iso: string | null, now: number): string {

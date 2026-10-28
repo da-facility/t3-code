@@ -72,6 +72,8 @@ Every host's agents get `fleet_servers_list`, `fleet_server_info`, `fleet_servic
 
 Scope enrolls with the metaserver by its Tailscale address. The first phone becomes the owner; later phones wait until an enrolled phone (or `t3-metaserver device approve <id>`) approves them. Revoking a phone deletes its wrapped vault key and rotates the vault key at the next unlock.
 
+Phones reach t3 servers through the metaserver, not over a Tailscale path to each machine. Every linked server gets its own relay port on the metaserver (9001, 9002, ... from `T3_METASERVER_RELAY_PORT_BASE`), and Caddy proxies `https://metaserver.example.ts.net:<port>` to that server's t3 URL. A server keeps its port until it is unlinked, so saved connections stay valid; Scope moves older direct connections onto the relay by itself. The ports must be reachable on the tailnet (`ufw allow in on tailscale0` covers them). The deploy script sets `T3_METASERVER_PUBLIC_HOST` to the metaserver's tailnet name; without it the relay is off and phones connect directly. `serve`, `link`, `unlink` and `server remove` rewrite `/etc/caddy/t3-relays.caddy` and reload Caddy; check it with `cat /etc/caddy/t3-relays.caddy`, `t3-metaserver server list --json` (each server's `relayUrl`) and `journalctl -u t3-metaserver` for sync errors.
+
 Push needs an APNs auth key from the Apple developer account: put the `.p8` on the metaserver and write `/var/lib/t3-metaserver/apns.json`:
 
 ```json

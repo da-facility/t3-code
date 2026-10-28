@@ -13,7 +13,7 @@ Repo: `da-facility/t3-code`, a public fork of pingdotgg/t3code. **No PII in the 
 - **T3 Connect:** removed, or at least never invoked. The metaserver over Tailscale replaces it; push notifications come from the metaserver.
 - **t3 metaserver:** cloud Ubuntu server, reachable only over Tailscale. It reaches each t3 server through its t3 client and serves Scope, the metaclient. It holds its own SSH key to scan every host; each T3 host keeps its own key and connects directly.
 - **Fleet tool:** every agent can see and invoke every server. No gate, no hop limit.
-- **Browser stream:** the phone streams directly from the server over Tailscale by default, with an option to relay through the metaserver.
+- **Browser stream:** the phone streams the browser view from the t3 server through the metaserver relay, like every other request.
 - **1Password:**
   - `op` uses manual sign-in on the metaserver. The desktop app is never installed, so there is no fingerprint prompt.
   - The master password is stored encrypted on the metaserver; each phone holds its own wrapped vault key.
@@ -34,7 +34,8 @@ Repo: `da-facility/t3-code`, a public fork of pingdotgg/t3code. **No PII in the 
 - **Fleet MCP:** the metaserver re-exports an allowlist of T3's orchestration tools as `fleet_*` with a `server` argument (schemas come live from the linked servers), plus `fleet_servers_list`, `fleet_server_info`, `fleet_service_find` and `fleet_overview`. Each host gets its own fleet token (stored hashed). Agents get it through user-level config T3 already honours: `claude mcp add --scope user` and `[mcp_servers.fleet]` in `~/.codex/config.toml`.
 - **Codex install:** T3's managed Codex install is only reachable through the web UI's RPC, so the installer leaves it as one click (Install, then Continue with ChatGPT) next to Claude's sign-in in Settings → Providers.
 - **Claude sign-in:** Settings → Providers runs `claude auth login` in a PTY and shows it in the panel's terminal; paste the code back there.
-- **Scope and threads:** Scope talks to the metaserver for the fleet view, enrollment and push, and pairs directly with each T3 server (the metaserver mints the pairing link) to reuse T3's thread, composer and approval UI. T3's MCP cannot list or answer permission approvals, so the metaserver alerts on a thread entering `waiting` and the approval itself happens over the direct connection.
+- **Scope and threads:** Scope talks to the metaserver for the fleet view, enrollment and push, and pairs with each T3 server through the metaserver's relay (the metaserver mints the pairing link) to reuse T3's thread, composer and approval UI. T3's MCP cannot list or answer permission approvals, so the metaserver alerts on a thread entering `waiting` and the approval itself happens over the relayed connection.
+- **Relay, not sync:** the phone needs one connection point, so Caddy on the metaserver relays it to every t3 server; agents already reach every t3 server through the metaserver's fleet tools. One HTTPS port per server, not a path, because T3 clients drop URL paths and DPoP signs the exact URL.
 - **Push:** the metaserver sends APNs itself with a `.p8` key you provide (`/var/lib/t3-metaserver/apns.json`); development-signed builds use the APNs sandbox.
 - **Scope identity:** bundle id `io.dafacility.fleetscope`; the Apple team id is passed at build time (`DEVELOPMENT_TEAM`) and never committed.
 - **Scanning:** manual (`t3-metaserver scan <id>|--all`) with the metaserver's own key, which each host must authorize with `from=` limited to the tailnet. No real host was scanned during setup.

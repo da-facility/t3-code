@@ -1,6 +1,7 @@
 import type { RegistryServer, RegistryService } from "@t3tools/fleet/registry";
 
 import type { MetaserverDb, Link } from "./db.ts";
+import { relayUrl } from "./relay.ts";
 import { T3Client, type McpTool, type McpToolResult, toolResultValue } from "./t3Client.ts";
 
 /**
@@ -103,13 +104,23 @@ export class ToolCallError extends Error {
 export class Fleet {
   private readonly db: MetaserverDb;
   private readonly fetchImpl: typeof fetch;
+  /** The metaserver's tailnet name when the Caddy relay is on, else null. */
+  private readonly publicHost: string | null;
   private readonly clients = new Map<string, { link: Link; client: T3Client }>();
   private toolCatalog: { tools: McpTool[]; at: number } | null = null;
   private readonly overviews = new Map<string, ServerOverview>();
 
-  constructor(db: MetaserverDb, fetchImpl: typeof fetch = fetch) {
+  constructor(db: MetaserverDb, fetchImpl: typeof fetch = fetch, publicHost: string | null = null) {
     this.db = db;
     this.fetchImpl = fetchImpl;
+    this.publicHost = publicHost;
+  }
+
+  /** Where phones reach a linked server: its port on the metaserver, or null without the relay. */
+  relayUrl(link: Link) {
+    return this.publicHost !== null && link.relayPort !== null
+      ? relayUrl(this.publicHost, link.relayPort)
+      : null;
   }
 
   client(serverId: string): T3Client {
@@ -184,7 +195,10 @@ export class Fleet {
     return asRecord(environment);
   }
 
-  /** Mints a one-time pairing link on a linked server, for a phone to connect to it directly. */
+  /**
+   * Mints a one-time pairing link on a linked server. The phone connects through the
+   * relay when it is on, and to the server's own URL otherwise.
+   */
   async mintPairingLink(serverId: string, label: string) {
     const link = this.db.getLink(serverId);
     if (!link) throw new Error(`Server '${serverId}' is not linked to the metaserver.`);
@@ -202,7 +216,7 @@ export class Fleet {
     const body = asRecord(JSON.parse(text));
     const credential = pickString(body, "credential", "token");
     if (!credential) throw new Error("Pairing token response had no credential.");
-    const base = link.t3Url.replace(/\/+$/, "");
+    const base = (this.relayUrl(link) ?? link.t3Url).replace(/\/+$/, "");
     return {
       serverId,
       url: base,
@@ -318,6 +332,7 @@ export class Fleet {
         t3: link
           ? { url: link.t3Url, linked: true, lastOkAt: link.lastOkAt, lastError: link.lastError }
           : { url: server.t3Url, linked: false, lastOkAt: null, lastError: null },
+        relayUrl: link ? this.relayUrl(link) : null,
         serviceCount: services.filter((service) => service.serverId === server.id).length,
       };
     });

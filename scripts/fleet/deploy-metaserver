@@ -2,7 +2,8 @@
 # Builds the t3 metaserver and installs it on an Ubuntu host as a systemd service.
 #   scripts/fleet/deploy-metaserver <ssh-target> [--port 8780]
 # Re-running it updates the metaserver in place; its state in /var/lib/t3-metaserver stays.
-# Caddy serves it at https://<metaserver tailscale name> with a Tailscale certificate.
+# Caddy serves it at https://<metaserver tailscale name> with a Tailscale certificate,
+# and relays phones to each linked t3 server on its own port (9001, 9002, ...).
 # The metaserver and Caddy listen on all interfaces; keep them behind a firewall that
 # only admits the tailnet (docs/operations/fleet.md does this with ufw).
 set -euo pipefail
@@ -57,9 +58,28 @@ if [ ! -x "$node_dir/bin/node" ]; then
   rm -rf "$tmp"
 fi
 mv /opt/t3-metaserver/t3-metaserver.mjs.new /opt/t3-metaserver/t3-metaserver.mjs
+
+# The tailnet name serves the metaserver and its relay ports. Without it the relay stays off.
+metaserver_name="$(tailscale status --json 2>/dev/null | "$node_dir/bin/node" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log((JSON.parse(s).Self?.DNSName??"").replace(/\.$/,""))}catch{console.log("")}})')" || true
+public_host_env=""
+if [ -n "$metaserver_name" ]; then
+  if ! command -v caddy >/dev/null; then
+    echo "Installing Caddy..."
+    curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+    curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt > /etc/apt/sources.list.d/caddy-stable.list
+    apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq caddy >/dev/null
+  fi
+  # The Caddyfile imports this; it must exist before anything reloads Caddy.
+  install -d /etc/caddy
+  [ -e /etc/caddy/t3-relays.caddy ] || install -m 644 /dev/null /etc/caddy/t3-relays.caddy
+  public_host_env="T3_METASERVER_PUBLIC_HOST=${metaserver_name}"
+fi
+
+# CLI commands such as link rewrite the relay file too, so the wrapper carries the host.
 cat > /usr/local/bin/t3-metaserver <<WRAP
 #!/bin/sh
 export T3_METASERVER_HOME="\${T3_METASERVER_HOME:-/var/lib/t3-metaserver}"
+${public_host_env:+export ${public_host_env}}
 exec $node_dir/bin/node /opt/t3-metaserver/t3-metaserver.mjs "\$@"
 WRAP
 chmod 755 /usr/local/bin/t3-metaserver
@@ -73,6 +93,7 @@ Wants=network-online.target
 [Service]
 Environment=T3_METASERVER_HOME=/var/lib/t3-metaserver
 Environment=T3_METASERVER_PORT=${PORT}
+${public_host_env:+Environment=${public_host_env}}
 ExecStart=/usr/local/bin/t3-metaserver serve
 Restart=always
 RestartSec=3
@@ -89,21 +110,17 @@ for _ in $(seq 1 20); do curl -sf "http://127.0.0.1:${PORT}/healthz" >/dev/null 
 curl -sf "http://127.0.0.1:${PORT}/healthz" >/dev/null || { journalctl -u t3-metaserver -n 20 --no-pager; exit 1; }
 echo "t3-metaserver is running on port ${PORT}."
 
-metaserver_name="$(tailscale status --json 2>/dev/null | "$node_dir/bin/node" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log((JSON.parse(s).Self?.DNSName??"").replace(/\.$/,""))}catch{console.log("")}})')" || true
 if [ -z "$metaserver_name" ]; then
-  echo "Tailscale is not up; skipping HTTPS. Re-run once it is."
+  echo "Tailscale is not up; skipping HTTPS and the relay. Re-run once it is."
 else
-  if ! command -v caddy >/dev/null; then
-    echo "Installing Caddy..."
-    curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-    curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt > /etc/apt/sources.list.d/caddy-stable.list
-    apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq caddy >/dev/null
-  fi
+  # The metaserver wrote t3-relays.caddy on startup; it lists one site per linked t3 server.
   cat > /etc/caddy/Caddyfile <<CADDY
 # Managed by scripts/fleet/deploy-metaserver. The certificate comes from tailscaled.
 ${metaserver_name} {
 	reverse_proxy 127.0.0.1:${PORT}
 }
+
+import /etc/caddy/t3-relays.caddy
 CADDY
   systemctl reload-or-restart caddy
   # tailscaled hands certificates only to root unless told otherwise. Restart it
@@ -112,7 +129,7 @@ CADDY
     echo 'TS_PERMIT_CERT_UID=caddy' >> /etc/default/tailscaled
     systemd-run --quiet --on-active=3 systemctl restart tailscaled
   fi
-  echo "HTTPS: https://${metaserver_name}"
+  echo "HTTPS: https://${metaserver_name} (relay sites: /etc/caddy/t3-relays.caddy)"
 fi
 echo "Metaserver SSH public key (add it to hosts the metaserver should scan):"
 t3-metaserver pubkey
