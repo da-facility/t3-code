@@ -120,12 +120,16 @@ if [ "$WANT_CLAUDE" = 1 ] && [ ! -x "$HOME/.local/bin/claude" ] && ! command -v 
   echo "Installing Claude Code (native installer)..." >&2
   curl -fsSL https://claude.ai/install.sh | bash >&2
 fi
+# Another T3 (an old npx or system unit) may hold port 3773, so check the version that answers.
+running=""
 for _ in $(seq 1 60); do
-  curl -sf http://127.0.0.1:3773/.well-known/t3/environment >/dev/null && break
+  running="$(curl -sf http://127.0.0.1:3773/.well-known/t3/environment | sed -n "s/.*\"serverVersion\":\"\([^\"]*\)\".*/\1/p")"
+  [ "$running" = "$VERSION" ] && break
   sleep 1
 done
-curl -sf http://127.0.0.1:3773/.well-known/t3/environment >/dev/null || { echo "t3 did not come up on port 3773; see ~/.t3/userdata/logs/boot-service.log" >&2; exit 1; }
-' RELEASE_BASE="$release_base" WANT_CLAUDE="$claude"
+[ -n "$running" ] || { echo "t3 did not come up on port 3773; see ~/.t3/userdata/logs/boot-service.log" >&2; exit 1; }
+[ "$running" = "$VERSION" ] || { echo "port 3773 is served by t3 ${running}, not ${VERSION}: another T3 is running here (check systemctl, npx). Stop it, then re-run." >&2; exit 1; }
+' RELEASE_BASE="$release_base" WANT_CLAUDE="$claude" VERSION="$version"
 
 # 4. Metaserver link and the fleet MCP.
 metaserver_scopes="orchestration:read orchestration:operate settings:write providers:manage preview:operate diagnostics:read terminal:read terminal:operate source-control:write filesystem:read filesystem:write access:read access:write"
