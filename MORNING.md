@@ -108,7 +108,7 @@ The fork's CI workflow is disabled along with the other upstream workflows (they
 - **TOTP fallback** for 1Password (only needed if `op` asks for 2FA on every sign-in) is not built. Run the test below first.
 - **Scope on Android** is not built.
 - **Interactive simulator testing of Scope** was not possible (see 6).
-- **The VPS's own T3 server** is a throwaway test install, linked to the hub as `vps` with a loopback URL. Keep it (re-run the installer with its Tailscale URL) or remove it with `t3 service uninstall`.
+- **The VPS's own T3 server** is linked to the hub under the VPS's hostname, over its tailnet URL. It started as a test install; remove it with `t3 service uninstall` if the hub should only be a hub.
 - **Old credentials accumulate:** re-linking a host leaves its previous hub sessions valid on that host. List and revoke them with `t3 auth session list` / `t3 auth session revoke` if you care.
 - **Throwaway servers on your Mac:** two T3 servers and a local hub ran under `/tmp/fleet-test` during testing. I stopped them by PID. Nothing touched `~/.t3`.
 
