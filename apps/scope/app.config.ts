@@ -182,7 +182,7 @@ const config: ExpoConfig = {
     clerk: { publishableKey: null, jwtTemplate: null },
     observability: { tracesUrl: null, tracesDataset: null, tracesToken: null },
     apsEnvironment: APS_ENVIRONMENT,
-    /** Optional default hub URL baked into a build, e.g. http://hub.example.ts.net:8780. */
+    /** Optional default hub URL baked into a build, e.g. https://hub.example.ts.net. */
     defaultHubUrl: process.env.SCOPE_DEFAULT_HUB_URL ?? null,
   },
   experiments: {

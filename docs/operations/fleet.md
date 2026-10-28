@@ -17,13 +17,13 @@ Tag `v<upstream>-fleet.<n>` on `main` and push it, or run the **Fleet release** 
 
 ## The hub
 
-Deploy or update it (builds `apps/hub` to one file, installs Node and a systemd unit):
+Deploy or update it (builds `apps/hub` to one file, installs Node, a systemd unit, and Caddy):
 
 ```sh
 scripts/fleet/deploy-hub root@hub
 ```
 
-It listens on port 8780 on all interfaces, so the host firewall must admit only SSH and `tailscale0`:
+The hub listens on port 8780. Caddy serves it at `https://hub.example.ts.net` on port 443 with a Let's Encrypt certificate it gets from tailscaled (the script sets `TS_PERMIT_CERT_UID=caddy`), so the tailnet needs HTTPS certificates turned on. Hosts and Scope use the HTTPS address; plain `:8780` still answers on the tailnet. Certificate names appear in public Certificate Transparency logs. Both listen on all interfaces, so the host firewall must admit only SSH and `tailscale0`:
 
 ```sh
 ufw default deny incoming && ufw allow 22/tcp && ufw allow in on tailscale0 && ufw enable

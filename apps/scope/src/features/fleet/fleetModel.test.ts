@@ -18,8 +18,9 @@ const server = (id: string, linked = true): HubServer => ({
 });
 
 describe("normalizeHubUrl", () => {
-  it("adds the scheme and the hub's default port", () => {
-    expect(normalizeHubUrl("hub.example.ts.net")).toBe("http://hub.example.ts.net:8780");
+  it("defaults to HTTPS, and to the hub's port for plain HTTP", () => {
+    expect(normalizeHubUrl("hub.example.ts.net")).toBe("https://hub.example.ts.net");
+    expect(normalizeHubUrl("http://hub.example.ts.net")).toBe("http://hub.example.ts.net:8780");
     expect(normalizeHubUrl(" http://hub:9000/ ")).toBe("http://hub:9000");
     expect(normalizeHubUrl("https://hub.example.ts.net")).toBe("https://hub.example.ts.net");
   });

@@ -54,11 +54,11 @@ export interface HubOverview {
   readonly pending: ReadonlyArray<HubPending>;
 }
 
-/** Accepts `host:8780`, `http://host:8780/`, or a bare tailnet name; defaults the hub port. */
+/** Accepts a bare tailnet name (served over HTTPS by the hub's Caddy) or a full URL; plain `http://` defaults to the hub port. */
 export function normalizeHubUrl(input: string): string | null {
   const trimmed = input.trim();
   if (trimmed.length === 0) return null;
-  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
   let url: URL;
   try {
     url = new URL(withScheme);

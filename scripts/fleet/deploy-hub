@@ -2,8 +2,9 @@
 # Builds the fleet hub and installs it on an Ubuntu host as a systemd service.
 #   scripts/fleet/deploy-hub <ssh-target> [--port 8780]
 # Re-running it updates the hub in place; its state in /var/lib/fleet-hub stays.
-# The hub listens on all interfaces; keep it behind a firewall that only admits
-# the tailnet (the hub setup in MORNING.md does this with ufw).
+# Caddy serves it at https://<hub tailscale name> with a Tailscale certificate.
+# The hub and Caddy listen on all interfaces; keep them behind a firewall that
+# only admits the tailnet (docs/operations/fleet.md does this with ufw).
 set -euo pipefail
 
 usage() { sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
@@ -72,6 +73,32 @@ systemctl restart fleet-hub
 for _ in $(seq 1 20); do curl -sf "http://127.0.0.1:${PORT}/healthz" >/dev/null && break; sleep 0.5; done
 curl -sf "http://127.0.0.1:${PORT}/healthz" >/dev/null || { journalctl -u fleet-hub -n 20 --no-pager; exit 1; }
 echo "fleet-hub is running on port ${PORT}."
+
+hub_name="$(tailscale status --json 2>/dev/null | "$node_dir/bin/node" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log((JSON.parse(s).Self?.DNSName??"").replace(/\.$/,""))}catch{console.log("")}})')" || true
+if [ -z "$hub_name" ]; then
+  echo "Tailscale is not up; skipping HTTPS. Re-run once it is."
+else
+  if ! command -v caddy >/dev/null; then
+    echo "Installing Caddy..."
+    curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+    curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt > /etc/apt/sources.list.d/caddy-stable.list
+    apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq caddy >/dev/null
+  fi
+  cat > /etc/caddy/Caddyfile <<CADDY
+# Managed by scripts/fleet/deploy-hub. The certificate comes from tailscaled.
+${hub_name} {
+	reverse_proxy 127.0.0.1:${PORT}
+}
+CADDY
+  systemctl reload-or-restart caddy
+  # tailscaled hands certificates only to root unless told otherwise. Restart it
+  # detached and last: this SSH session may be running over the tailnet.
+  if ! grep -q '^TS_PERMIT_CERT_UID=caddy$' /etc/default/tailscaled; then
+    echo 'TS_PERMIT_CERT_UID=caddy' >> /etc/default/tailscaled
+    systemd-run --quiet --on-active=3 systemctl restart tailscaled
+  fi
+  echo "HTTPS: https://${hub_name}"
+fi
 echo "Hub SSH public key (add it to hosts the hub should scan):"
 fleet-hub pubkey
 REMOTE

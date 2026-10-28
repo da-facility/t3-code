@@ -12,7 +12,7 @@
 #   --url URL          URL other machines use to reach this T3 server
 #                      (default: http://<tailscale name>:3773)
 #   --hub TARGET       SSH target of the hub; links this host and installs the fleet MCP
-#   --hub-url URL      URL agents on this host use for the hub (default: http://<hub tailscale name>:8780)
+#   --hub-url URL      URL agents on this host use for the hub (default: https://<hub tailscale name>)
 #   --no-claude        Skip installing Claude Code
 #   --dry-run          Print what would run; change nothing
 #
@@ -132,7 +132,7 @@ if [ -n "$hub" ]; then
   if [ -z "$hub_url" ]; then
     hub_ts="$(ssh -o BatchMode=yes "$hub" 'tailscale status --json 2>/dev/null' | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log((JSON.parse(s).Self?.DNSName??"").replace(/\.$/,""))}catch{console.log("")}})')" || true
     [ -n "$hub_ts" ] || die "cannot tell the hub's tailscale name; pass --hub-url"
-    hub_url="http://${hub_ts}:8780"
+    hub_url="https://${hub_ts}"
   fi
   say "Linking ${name} to the hub"
   if [ "$dry" = 1 ]; then

@@ -39,7 +39,7 @@ The macOS path (launchd, logged-in GUI session check) is written but untested, b
 
 ### 4. Hub with the fleet MCP (running on the VPS)
 
-- `fleet-hub` runs under systemd on port 8780. `ssh root@<VPS> fleet-hub help` lists the commands.
+- `fleet-hub` runs under systemd on port 8780, behind Caddy at `https://<hub tailscale name>` (a real Let's Encrypt certificate via Tailscale). `ssh root@<VPS> fleet-hub help` lists the commands.
 - Agents see the following tools; there is no gate:
   - `fleet_servers_list`, `fleet_server_info`, `fleet_service_find`, `fleet_overview`;
   - T3's thread and project tools as `fleet_*` with a `server` argument.
@@ -120,12 +120,12 @@ The fork's CI workflow is disabled along with the other upstream workflows (they
 ## Your checklist, in order
 
 1. ~~**Tailscale on the VPS.**~~ Done after you approved the node. Tailscale SSH is off (your call); plain `sshd` answers over the tailnet with the existing key. Public SSH is closed: ufw now admits only `tailscale0`. The VPS's test T3 server and the hub are re-linked with their tailnet addresses, and agents there reach the fleet MCP over the tailnet. To reach the VPS from now on, use `ssh root@<hub tailscale name>`.
-2. **Point hosts at the hub's tailnet name.** For each host, `scripts/fleet/install user@host --hub root@<hub tailscale name>`. The default hub URL becomes `http://<hub tailscale name>:8780`. On macOS hosts, be logged in to the desktop first.
+2. **Point hosts at the hub's tailnet name.** For each host, `scripts/fleet/install user@host --hub root@<hub tailscale name>`. The default hub URL is `https://<hub tailscale name>`. On macOS hosts, be logged in to the desktop first.
 3. **Provider sign-ins** on each host, using the link the installer prints (it pairs your browser):
    - Settings → Providers → Sign in with Claude: paste the code into the terminal.
    - Codex: Install, then Continue with ChatGPT.
-4. **Install Scope `v1.0.0-b4`** (or the newest) from Selfstore in Safari, with Tailscale connected. In the Tailscale iOS app, turn on VPN On Demand.
-5. **Enroll** in Scope. From b4 the hub address is prefilled at build time; otherwise type `<hub tailscale name>` and port 8780 is added for you. This first phone becomes the owner. Tap **Enable push**.
+4. **Install Scope `v1.0.0-b5`** (or the newest) from Selfstore in Safari, with Tailscale connected. In the Tailscale iOS app, turn on VPN On Demand.
+5. **Enroll** in Scope. From b5 the HTTPS hub address is prefilled; otherwise type `<hub tailscale name>` and Scope uses HTTPS. (b4 prefills the old `http://…:8780` address, which still works.) This first phone becomes the owner. Tap **Enable push**.
 6. **APNs:**
    1. Create an APNs auth key (`.p8`) in the Apple developer account.
    2. Copy it to `/var/lib/fleet-hub/` on the hub and write `/var/lib/fleet-hub/apns.json` (format in docs/operations/fleet.md; topic `io.dafacility.fleetscope`).
