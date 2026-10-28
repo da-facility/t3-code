@@ -119,16 +119,13 @@ The fork's CI workflow is disabled along with the other upstream workflows (they
 
 ## Your checklist, in order
 
-1. **Tailscale on the VPS.**
-   1. `ssh root@<VPS> tailscale up --ssh`, then approve the node in your admin console.
-   2. Check `ssh root@<hub tailscale name>` works.
-   3. Close public SSH: `ufw delete allow 22/tcp` (this also removes the v6 rule).
+1. ~~**Tailscale on the VPS.**~~ Done after you approved the node. Tailscale SSH is off (your call); plain `sshd` answers over the tailnet with the existing key. Public SSH is closed: ufw now admits only `tailscale0`. The VPS's test T3 server and the hub are re-linked with their tailnet addresses, and agents there reach the fleet MCP over the tailnet. To reach the VPS from now on, use `ssh root@<hub tailscale name>`.
 2. **Point hosts at the hub's tailnet name.** For each host, `scripts/fleet/install user@host --hub root@<hub tailscale name>`. The default hub URL becomes `http://<hub tailscale name>:8780`. On macOS hosts, be logged in to the desktop first.
 3. **Provider sign-ins** on each host, using the link the installer prints (it pairs your browser):
    - Settings → Providers → Sign in with Claude: paste the code into the terminal.
    - Codex: Install, then Continue with ChatGPT.
-4. **Install Scope** from Selfstore in Safari, with Tailscale connected. In the Tailscale iOS app, turn on VPN On Demand.
-5. **Enroll** in Scope with `<hub tailscale name>` (port 8780 is added for you). This first phone becomes the owner. Tap **Enable push**.
+4. **Install Scope `v1.0.0-b4`** (or the newest) from Selfstore in Safari, with Tailscale connected. In the Tailscale iOS app, turn on VPN On Demand.
+5. **Enroll** in Scope. From b4 the hub address is prefilled at build time; otherwise type `<hub tailscale name>` and port 8780 is added for you. This first phone becomes the owner. Tap **Enable push**.
 6. **APNs:**
    1. Create an APNs auth key (`.p8`) in the Apple developer account.
    2. Copy it to `/var/lib/fleet-hub/` on the hub and write `/var/lib/fleet-hub/apns.json` (format in docs/operations/fleet.md; topic `io.dafacility.fleetscope`).

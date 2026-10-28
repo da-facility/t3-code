@@ -43,7 +43,7 @@ Repo: `da-facility/t3-code`, a public fork of pingdotgg/t3code. **No PII in the 
 - **Vault setup happens on the hub:** `fleet-hub vault setup` reads the master password on stdin, checks it with `op signin`, then signs out. Phones register their public key first; a phone enrolled later gets K wrapped at the next unlock from an existing phone.
 - **Browser fill:** a login form in any frame prompts the phone at most once per site every two minutes; the approved login is filled and submitted from an isolated world. Passkeys use a main-world `navigator.credentials` override; the server takes the origin from the CDP execution context, never from the page, and the hub checks the rpId against it. Conditional (autofill) passkey requests are not answered.
 - **Simulator testing:** T3's device tools are turned off in this environment, so Scope was only launched in the simulator (setup screen renders); interactive flows were tested against the hub with scripted clients instead.
-- **VPS firewall:** ufw denies all incoming traffic except 22/tcp and anything on `tailscale0`. Public SSH stays open until Tailscale SSH is confirmed.
+- **VPS access:** ufw admits only `tailscale0`. Public SSH was closed after plain SSH over the tailnet was confirmed. Tailscale SSH is off: `sshd` with keys, reached through the tailnet.
 - **Out of scope:**
   - Windows.
   - The desktop client.
