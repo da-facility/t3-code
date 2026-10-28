@@ -26,7 +26,7 @@ import {
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { Platform, Pressable, View } from "react-native";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
-import { KeyboardController } from "react-native-keyboard-controller";
+import { KeyboardController, KeyboardStickyView } from "react-native-keyboard-controller";
 
 import {
   AuthOrchestrationOperateScope,
@@ -1082,19 +1082,22 @@ export function NewTaskDraftScreen(props: {
           />
         }
       >
-        <View className="flex-1 justify-end gap-3 p-4">
-          {environmentControl}
-          <Text className="text-foreground-muted">
-            Your draft is saved on this device. Connect to an environment to choose its first model.
-          </Text>
-          <ComposerEditor
-            draftKey={flow.draftKey}
-            value={flow.prompt}
-            onChangeText={flow.setPrompt}
-            placeholder="Ask anything"
-            multiline
-            style={{ minHeight: 64 }}
-          />
+        <View className="flex-1 justify-end p-4">
+          <KeyboardStickyView style={{ gap: 12 }}>
+            {environmentControl}
+            <Text className="text-foreground-muted">
+              No model is available on this environment. Pick another one, or sign in to an agent
+              under Settings → Providers. Your draft is saved on this device.
+            </Text>
+            <ComposerEditor
+              draftKey={flow.draftKey}
+              value={flow.prompt}
+              onChangeText={flow.setPrompt}
+              placeholder="Ask anything"
+              multiline
+              style={{ minHeight: 64 }}
+            />
+          </KeyboardStickyView>
         </View>
       </ThreadScreenFallback>
     );

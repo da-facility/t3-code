@@ -30,6 +30,7 @@ import {
   forgetMetaserver,
   type MetaserverLink,
   metaserverRequest,
+  moveToBuildMetaserver,
   loadMetaserverLink,
   useMetaserverLink,
 } from "./metaserverClient";
@@ -515,8 +516,11 @@ async function fetchFleet(
       },
     };
   } catch (cause) {
-    return {
-      error: { status: (cause as { status?: number }).status ?? 0, message: describe(cause) },
-    };
+    const status = (cause as { status?: number }).status ?? 0;
+    // A saved address that stopped answering may be a renamed metaserver; the link store
+    // re-renders with the build's address when the move works.
+    if (status === 0)
+      await moveToBuildMetaserver(link, normalizeMetaserverUrl(defaultMetaserverUrl));
+    return { error: { status, message: describe(cause) } };
   }
 }

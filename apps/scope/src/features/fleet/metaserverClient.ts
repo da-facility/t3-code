@@ -111,6 +111,24 @@ export async function enrollWithMetaserver(url: string, name: string): Promise<M
   return result.device;
 }
 
+/**
+ * When the saved address stops answering, tries the address this build was made for with the
+ * same device token, and keeps it if the metaserver knows the device. Covers a renamed metaserver.
+ */
+export async function moveToBuildMetaserver(
+  link: MetaserverLink,
+  buildUrl: string | null,
+): Promise<boolean> {
+  if (!buildUrl || buildUrl === link.url) return false;
+  try {
+    await metaserverRequest({ url: buildUrl, token: link.token }, "/api/me");
+  } catch {
+    return false;
+  }
+  await saveMetaserverLink({ ...link, url: buildUrl });
+  return true;
+}
+
 export async function forgetMetaserver() {
   await saveMetaserverLink(null);
 }
