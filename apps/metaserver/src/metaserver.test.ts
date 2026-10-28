@@ -150,6 +150,24 @@ describe("t3 metaserver", () => {
     expect(ports()).toEqual({ "host-b": 9002, "host-c": 9003, "host-d": 9001 });
   });
 
+  it("leaves the relay file readable by Caddy under the service's strict umask", async () => {
+    await using metaserver = await setup();
+    link(metaserver.db, "host-a", "http://host-a:3773");
+    const caddyFile = NodePath.join(metaserver.dir, "t3-relays.caddy");
+    const previous = process.umask(0o077);
+    try {
+      await syncRelay(metaserver.db, {
+        publicHost: "metaserver.example.ts.net",
+        portBase: 9001,
+        caddyFile,
+        reloadCommand: "true",
+      });
+    } finally {
+      process.umask(previous);
+    }
+    expect(NodeFS.statSync(caddyFile).mode & 0o777).toBe(0o644);
+  });
+
   it("writes one Caddy site per linked server and reloads only on change", async () => {
     await using metaserver = await setup();
     const { db } = metaserver;

@@ -75,7 +75,9 @@ export async function syncRelay(
       NodePath.dirname(config.caddyFile),
       `.${NodePath.basename(config.caddyFile)}.tmp`,
     );
-    NodeFS.writeFileSync(temporary, content, { mode: 0o644 });
+    NodeFS.writeFileSync(temporary, content);
+    // Caddy runs as its own user, and the metaserver's unit sets UMask=0077.
+    NodeFS.chmodSync(temporary, 0o644);
     NodeFS.renameSync(temporary, config.caddyFile);
     changed = true;
     const [command, ...args] = config.reloadCommand.split(" ").filter(Boolean);
