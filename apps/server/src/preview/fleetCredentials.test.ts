@@ -1,13 +1,15 @@
 import { describe, expect, it } from "@effect/vitest";
 
-import { fleetHubConfig, hubCredentialSource, makeAskGate } from "./fleetCredentials.ts";
+import { metaserverConfig, metaserverCredentialSource, makeAskGate } from "./fleetCredentials.ts";
 
 describe("fleet credentials", () => {
-  it("is off unless both the hub URL and token are set", () => {
-    expect(fleetHubConfig({})).toBeNull();
-    expect(fleetHubConfig({ FLEET_HUB_URL: "http://hub:8780/" })).toBeNull();
-    expect(fleetHubConfig({ FLEET_HUB_URL: "http://hub:8780/", FLEET_HUB_TOKEN: "t" })).toEqual({
-      url: "http://hub:8780",
+  it("is off unless both the metaserver URL and token are set", () => {
+    expect(metaserverConfig({})).toBeNull();
+    expect(metaserverConfig({ T3_METASERVER_URL: "http://metaserver:8780/" })).toBeNull();
+    expect(
+      metaserverConfig({ T3_METASERVER_URL: "http://metaserver:8780/", T3_METASERVER_TOKEN: "t" }),
+    ).toEqual({
+      url: "http://metaserver:8780",
       token: "t",
     });
   });
@@ -24,7 +26,7 @@ describe("fleet credentials", () => {
     expect(gate("https://example.com/login")).toBe(true);
   });
 
-  it("asks the hub with the fleet token and treats a refusal as no credential", async () => {
+  it("asks the metaserver with the fleet token and treats a refusal as no credential", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     let status = 200;
     const fakeFetch = (async (url: string, init: RequestInit) => {
@@ -36,12 +38,15 @@ describe("fleet credentials", () => {
         },
       );
     }) as unknown as typeof fetch;
-    const source = hubCredentialSource({ url: "http://hub:8780", token: "fleet_x" }, fakeFetch);
+    const source = metaserverCredentialSource(
+      { url: "http://metaserver:8780", token: "fleet_x" },
+      fakeFetch,
+    );
     expect(await source("https://example.com/login")).toEqual({
       username: "alice",
       password: "pw",
     });
-    expect(calls[0]!.url).toBe("http://hub:8780/credentials");
+    expect(calls[0]!.url).toBe("http://metaserver:8780/credentials");
     expect((calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer fleet_x");
     expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ url: "https://example.com/login" });
     status = 403;

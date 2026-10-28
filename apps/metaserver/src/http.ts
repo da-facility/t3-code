@@ -1,19 +1,19 @@
 import * as NodeHttp from "node:http";
 
-import type { Device, HubDb } from "./db.ts";
+import type { Device, MetaserverDb } from "./db.ts";
 import { type Fleet, PROXIED_TOOLS, ToolCallError } from "./fleet.ts";
 import { handleFleetMcp } from "./fleetMcp.ts";
 import { rpIdAllowed } from "./vault/passkeys.ts";
 import type { PushFn } from "./watcher.ts";
 
 /**
- * The hub's HTTP surface, reachable only over Tailscale:
+ * The metaserver's HTTP surface, reachable only over Tailscale:
  *   /mcp   fleet MCP for agents (fleet token)
  *   /api/* the Scope app (device token)
  */
 
-export interface HubHttpOptions {
-  db: HubDb;
+export interface MetaserverHttpOptions {
+  db: MetaserverDb;
   fleet: Fleet;
   push: PushFn | null;
   /** Extra routes (the vault) mounted under /api. Returns false when it did not handle the request. */
@@ -41,7 +41,7 @@ export interface HubHttpOptions {
       requester: string;
     }) => Promise<unknown>;
   };
-  /** Loopback-only operator routes for the hub CLI (vault lock, test requests). */
+  /** Loopback-only operator routes for the metaserver CLI (vault lock, test requests). */
   adminRoutes?: (path: string, body: unknown) => Promise<unknown>;
 }
 
@@ -107,7 +107,7 @@ const publicDevice = (device: Device) => ({
   lastSeenAt: device.lastSeenAt,
 });
 
-export function createHubServer(options: HubHttpOptions) {
+export function createMetaserverHttpServer(options: MetaserverHttpOptions) {
   const { db, fleet } = options;
 
   const requireApproved = (device: Device | null) => {
@@ -188,7 +188,7 @@ export function createHubServer(options: HubHttpOptions) {
       const body = (await context.body()) as { tool?: unknown; arguments?: unknown };
       const tool = String(body.tool ?? "");
       if (!PROXIED_TOOLS.has(tool))
-        throw new HttpError(400, `Tool '${tool}' is not available through the hub.`);
+        throw new HttpError(400, `Tool '${tool}' is not available through the metaserver.`);
       try {
         const value = await fleet.call(
           segments[1]!,
@@ -213,12 +213,12 @@ export function createHubServer(options: HubHttpOptions) {
       return send(200, { ok: true });
     }
     if (method === "POST" && path === "/api/push/test") {
-      if (!options.push) throw new HttpError(503, "Push is not configured on the hub.");
+      if (!options.push) throw new HttpError(503, "Push is not configured on the metaserver.");
       const fresh = db.getDevice(me.id)!;
       if (!fresh.apnsToken) throw new HttpError(400, "This device has not registered for push.");
       const result = await options.push(fresh.apnsToken, fresh.apnsEnv, {
         title: "Scope",
-        body: "Push notifications from the hub work.",
+        body: "Push notifications from the metaserver work.",
         timeSensitive: true,
       });
       return send(result.ok ? 200 : 502, result);
@@ -227,7 +227,7 @@ export function createHubServer(options: HubHttpOptions) {
   };
 
   return NodeHttp.createServer(async (request, response) => {
-    const url = new URL(request.url ?? "/", "http://hub");
+    const url = new URL(request.url ?? "/", "http://metaserver");
     const method = request.method ?? "GET";
     const send = (status: number, body: unknown, headers: Record<string, string> = {}) => {
       if (response.headersSent) return;

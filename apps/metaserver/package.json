@@ -1,8 +1,8 @@
 {
-  "name": "@t3tools/hub",
+  "name": "@t3tools/metaserver",
   "private": true,
   "bin": {
-    "fleet-hub": "./src/main.ts"
+    "t3-metaserver": "./src/main.ts"
   },
   "type": "module",
   "scripts": {

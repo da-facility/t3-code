@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# Builds the t3 metaserver and installs it on an Ubuntu host as a systemd service.
+#   scripts/fleet/deploy-metaserver <ssh-target> [--port 8780]
+# Re-running it updates the metaserver in place; its state in /var/lib/t3-metaserver stays.
+# Caddy serves it at https://<metaserver tailscale name> with a Tailscale certificate.
+# The metaserver and Caddy listen on all interfaces; keep them behind a firewall that
+# only admits the tailnet (docs/operations/fleet.md does this with ufw).
+set -euo pipefail
+
+usage() { sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+target=""; port=8780
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --port) port="$2"; shift 2 ;;
+    -h|--help) usage ;;
+    -*) echo "unknown option $1" >&2; usage 1 ;;
+    *) target="$1"; shift ;;
+  esac
+done
+[ -n "$target" ] || usage 1
+
+root="$(cd "$(dirname "$0")/../.." && pwd)"
+node_version="$(node -p 'require(process.argv[1]).engines.node' "$root/package.json")"
+
+echo "Building the metaserver..."
+(cd "$root/apps/metaserver" && ../../node_modules/.bin/vp pack src/main.ts --no-config -d dist --platform node --target node22 --logLevel error)
+
+echo "Installing on $target..."
+ssh "$target" "mkdir -p /opt/t3-metaserver && cat > /opt/t3-metaserver/t3-metaserver.mjs.new" < "$root/apps/metaserver/dist/main.mjs"
+ssh "$target" NODE_VERSION="$node_version" PORT="$port" bash -s <<'REMOTE'
+set -euo pipefail
+# Installs from before the rename ran as fleet-hub. Move their state over once.
+if [ -d /var/lib/fleet-hub ] && [ ! -e /var/lib/t3-metaserver ]; then
+  echo "Migrating the fleet-hub install to t3-metaserver..."
+  systemctl disable --now fleet-hub >/dev/null 2>&1 || true
+  mv /var/lib/fleet-hub /var/lib/t3-metaserver
+  if [ -f /var/lib/t3-metaserver/apns.json ]; then
+    sed -i 's#/var/lib/fleet-hub/#/var/lib/t3-metaserver/#g' /var/lib/t3-metaserver/apns.json
+  fi
+fi
+if [ -e /etc/systemd/system/fleet-hub.service ] || [ -e /usr/local/bin/fleet-hub ] || [ -d /opt/fleet-hub ]; then
+  systemctl disable --now fleet-hub >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/fleet-hub.service /usr/local/bin/fleet-hub
+  rm -rf /opt/fleet-hub
+  systemctl daemon-reload
+fi
+case "$(uname -m)" in x86_64) arch=x64 ;; aarch64|arm64) arch=arm64 ;; *) echo "unsupported arch" >&2; exit 1 ;; esac
+node_dir="/opt/t3-metaserver/node-v${NODE_VERSION}"
+if [ ! -x "$node_dir/bin/node" ]; then
+  echo "Installing Node ${NODE_VERSION}..."
+  tmp="$(mktemp -d)"
+  curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${arch}.tar.xz" -o "$tmp/node.tar.xz"
+  curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt" -o "$tmp/SHASUMS256.txt"
+  (cd "$tmp" && grep " node-v${NODE_VERSION}-linux-${arch}.tar.xz\$" SHASUMS256.txt | sed "s/node-v.*/node.tar.xz/" | sha256sum -c - >/dev/null)
+  mkdir -p "$node_dir"
+  tar -xJf "$tmp/node.tar.xz" -C "$node_dir" --strip-components=1
+  rm -rf "$tmp"
+fi
+mv /opt/t3-metaserver/t3-metaserver.mjs.new /opt/t3-metaserver/t3-metaserver.mjs
+cat > /usr/local/bin/t3-metaserver <<WRAP
+#!/bin/sh
+export T3_METASERVER_HOME="\${T3_METASERVER_HOME:-/var/lib/t3-metaserver}"
+exec $node_dir/bin/node /opt/t3-metaserver/t3-metaserver.mjs "\$@"
+WRAP
+chmod 755 /usr/local/bin/t3-metaserver
+install -d -m 700 /var/lib/t3-metaserver
+cat > /etc/systemd/system/t3-metaserver.service <<UNIT
+[Unit]
+Description=t3 metaserver
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Environment=T3_METASERVER_HOME=/var/lib/t3-metaserver
+Environment=T3_METASERVER_PORT=${PORT}
+ExecStart=/usr/local/bin/t3-metaserver serve
+Restart=always
+RestartSec=3
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now t3-metaserver >/dev/null 2>&1
+systemctl reset-failed t3-metaserver 2>/dev/null || true
+systemctl restart t3-metaserver
+for _ in $(seq 1 20); do curl -sf "http://127.0.0.1:${PORT}/healthz" >/dev/null && break; sleep 0.5; done
+curl -sf "http://127.0.0.1:${PORT}/healthz" >/dev/null || { journalctl -u t3-metaserver -n 20 --no-pager; exit 1; }
+echo "t3-metaserver is running on port ${PORT}."
+
+metaserver_name="$(tailscale status --json 2>/dev/null | "$node_dir/bin/node" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log((JSON.parse(s).Self?.DNSName??"").replace(/\.$/,""))}catch{console.log("")}})')" || true
+if [ -z "$metaserver_name" ]; then
+  echo "Tailscale is not up; skipping HTTPS. Re-run once it is."
+else
+  if ! command -v caddy >/dev/null; then
+    echo "Installing Caddy..."
+    curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+    curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt > /etc/apt/sources.list.d/caddy-stable.list
+    apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq caddy >/dev/null
+  fi
+  cat > /etc/caddy/Caddyfile <<CADDY
+# Managed by scripts/fleet/deploy-metaserver. The certificate comes from tailscaled.
+${metaserver_name} {
+	reverse_proxy 127.0.0.1:${PORT}
+}
+CADDY
+  systemctl reload-or-restart caddy
+  # tailscaled hands certificates only to root unless told otherwise. Restart it
+  # detached and last: this SSH session may be running over the tailnet.
+  if ! grep -q '^TS_PERMIT_CERT_UID=caddy$' /etc/default/tailscaled; then
+    echo 'TS_PERMIT_CERT_UID=caddy' >> /etc/default/tailscaled
+    systemd-run --quiet --on-active=3 systemctl restart tailscaled
+  fi
+  echo "HTTPS: https://${metaserver_name}"
+fi
+echo "Metaserver SSH public key (add it to hosts the metaserver should scan):"
+t3-metaserver pubkey
+REMOTE

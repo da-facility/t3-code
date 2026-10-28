@@ -7,7 +7,8 @@ import Security
 // The phone's vault key: a P-256 key-agreement key in the Secure Enclave, usable only after
 // Face ID (biometryCurrentSet). Simulators have no Secure Enclave, so they get a software key in
 // the Keychain instead; `isHardwareBacked` tells the two apart. The vault key K never leaves
-// this file: `unlock` opens the hub's wrapped copy and re-seals it to the hub's ephemeral key.
+// this file: `unlock` opens the metaserver's wrapped copy and re-seals it to the metaserver's
+// ephemeral key.
 
 private let keychainService = "io.dafacility.scope.vault"
 private let keychainAccount = "vault-key"
@@ -133,9 +134,10 @@ public class ScopeVaultModule: Module {
       return try createKey().publicKey.x963Representation.base64EncodedString()
     }
 
-    // Opens the hub's wrapped vault key with Face ID and seals it to the hub's ephemeral key.
+    // Opens the metaserver's wrapped vault key with Face ID and seals it to the metaserver's
+    // ephemeral key.
     AsyncFunction("unlock") {
-      (deviceId: String, wrappedEnc: String, wrappedCt: String, hubPublicKey: String, challengeId: String, reason: String)
+      (deviceId: String, wrappedEnc: String, wrappedCt: String, metaserverPublicKey: String, challengeId: String, reason: String)
         async throws -> [String: String] in
       let context = LAContext()
       context.localizedReason = reason
@@ -161,8 +163,8 @@ public class ScopeVaultModule: Module {
         vaultKey = try recipient.open(ciphertext, authenticating: Data(deviceId.utf8))
       }
       defer { vaultKey.resetBytes(in: 0..<vaultKey.count) }
-      let hubKey = try P256.KeyAgreement.PublicKey(x963Representation: try decode(hubPublicKey, "hub key"))
-      var sender = try HPKE.Sender(recipientKey: hubKey, ciphersuite: suite, info: infoUnlock)
+      let metaserverKey = try P256.KeyAgreement.PublicKey(x963Representation: try decode(metaserverPublicKey, "metaserver key"))
+      var sender = try HPKE.Sender(recipientKey: metaserverKey, ciphersuite: suite, info: infoUnlock)
       let sealed = try sender.seal(vaultKey, authenticating: Data(challengeId.utf8))
       return ["enc": sender.encapsulatedKey.base64EncodedString(), "ct": sealed.base64EncodedString()]
     }

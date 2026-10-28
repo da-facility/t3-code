@@ -2,7 +2,7 @@ import type { ExpoConfig } from "expo/config";
 
 /**
  * Scope: the fleet's phone app, built from a copy of apps/mobile. One variant.
- * No T3 Connect, Clerk, widgets or share extension; the fleet hub replaces
+ * No T3 Connect, Clerk, widgets or share extension; the t3 metaserver replaces
  * Connect for discovery and push. The Apple team comes from the environment
  * (SCOPE_IOS_TEAM_ID) so it never lands in the repo.
  */
@@ -59,10 +59,10 @@ const config: ExpoConfig = {
         "UIInterfaceOrientationLandscapeLeft",
         "UIInterfaceOrientationLandscapeRight",
       ],
-      // T3 servers and the hub are plain HTTP on the tailnet.
+      // T3 servers and the metaserver are plain HTTP on the tailnet.
       NSAppTransportSecurity: { NSAllowsArbitraryLoads: true },
       NSLocalNetworkUsageDescription:
-        "Allow Scope to reach your hub and T3 servers on your tailnet.",
+        "Allow Scope to reach your metaserver and T3 servers on your tailnet.",
       NSFaceIDUsageDescription: "Scope uses Face ID to unlock your vault key.",
       NSPhotoLibraryAddUsageDescription: "Allow Scope to save images to your photo library.",
       UIBackgroundModes: ["audio", "remote-notification"],
@@ -182,8 +182,8 @@ const config: ExpoConfig = {
     clerk: { publishableKey: null, jwtTemplate: null },
     observability: { tracesUrl: null, tracesDataset: null, tracesToken: null },
     apsEnvironment: APS_ENVIRONMENT,
-    /** Optional default hub URL baked into a build, e.g. https://hub.example.ts.net. */
-    defaultHubUrl: process.env.SCOPE_DEFAULT_HUB_URL ?? null,
+    /** Optional default metaserver URL for a build, e.g. https://metaserver.example.ts.net. */
+    defaultMetaserverUrl: process.env.SCOPE_DEFAULT_METASERVER_URL ?? null,
   },
   experiments: {
     reactCompiler: true,

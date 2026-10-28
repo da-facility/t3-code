@@ -6,16 +6,16 @@ import * as NodePath from "node:path";
 import { describe, expect, it } from "@effect/vitest";
 
 import type { PushMessage } from "./apns.ts";
-import { HubDb } from "./db.ts";
-import { Fleet, HUB_SCOPES } from "./fleet.ts";
-import { createHubServer } from "./http.ts";
-import { McpClient, toolResultValue } from "./mcpClient.ts";
+import { MetaserverDb } from "./db.ts";
+import { Fleet, METASERVER_SCOPES } from "./fleet.ts";
+import { createMetaserverHttpServer } from "./http.ts";
+import { T3Client, toolResultValue } from "./t3Client.ts";
 import { startFakeT3 } from "./testing/fakeT3.ts";
 import { Watcher } from "./watcher.ts";
 
 async function setup() {
-  const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fleet-hub-test-"));
-  const db = new HubDb(NodePath.join(dir, "hub.sqlite"));
+  const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-metaserver-test-"));
+  const db = new MetaserverDb(NodePath.join(dir, "metaserver.sqlite"));
   const t3 = await startFakeT3("mcp-token", "bearer-token");
   db.upsertServer({
     id: "host-a",
@@ -25,7 +25,7 @@ async function setup() {
   });
   db.setLink("host-a", t3.url, "bearer-token", "mcp-token");
   const fleet = new Fleet(db);
-  const server = createHubServer({ db, fleet, push: null });
+  const server = createMetaserverHttpServer({ db, fleet, push: null });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${(server.address() as NodeNet.AddressInfo).port}`;
   return {
@@ -49,50 +49,63 @@ const api = (base: string, path: string, token: string | null, body?: unknown) =
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   }).then(async (response) => ({ status: response.status, body: (await response.json()) as any }));
 
-describe("fleet hub", () => {
+describe("t3 metaserver", () => {
   it("makes the first device the owner and gates later ones on approval", async () => {
-    await using hub = await setup();
-    const owner = await api(hub.base, "/api/enroll", null, { name: "phone" });
+    await using metaserver = await setup();
+    const owner = await api(metaserver.base, "/api/enroll", null, { name: "phone" });
     expect(owner.body.device).toMatchObject({ role: "owner", status: "approved" });
 
-    const second = await api(hub.base, "/api/enroll", null, { name: "tablet" });
+    const second = await api(metaserver.base, "/api/enroll", null, { name: "tablet" });
     expect(second.body.device).toMatchObject({ role: "member", status: "pending" });
-    expect((await api(hub.base, "/api/servers", second.body.token)).status).toBe(403);
+    expect((await api(metaserver.base, "/api/servers", second.body.token)).status).toBe(403);
 
     const approved = await api(
-      hub.base,
+      metaserver.base,
       `/api/devices/${second.body.device.id}/approve`,
       owner.body.token,
       {},
     );
     expect(approved.body.device.status).toBe("approved");
-    expect((await api(hub.base, "/api/servers", second.body.token)).status).toBe(200);
+    expect((await api(metaserver.base, "/api/servers", second.body.token)).status).toBe(200);
 
     expect(
-      (await api(hub.base, `/api/devices/${owner.body.device.id}/revoke`, second.body.token, {}))
-        .status,
+      (
+        await api(
+          metaserver.base,
+          `/api/devices/${owner.body.device.id}/revoke`,
+          second.body.token,
+          {},
+        )
+      ).status,
     ).toBe(403);
-    await api(hub.base, `/api/devices/${second.body.device.id}/revoke`, owner.body.token, {});
-    expect((await api(hub.base, "/api/servers", second.body.token)).status).toBe(403);
-    expect((await api(hub.base, "/api/servers", "nonsense")).status).toBe(401);
+    await api(
+      metaserver.base,
+      `/api/devices/${second.body.device.id}/revoke`,
+      owner.body.token,
+      {},
+    );
+    expect((await api(metaserver.base, "/api/servers", second.body.token)).status).toBe(403);
+    expect((await api(metaserver.base, "/api/servers", "nonsense")).status).toBe(401);
   });
 
-  it("mints phone pairing links with the hub's scopes, never environment:maintain", async () => {
-    await using hub = await setup();
-    const { token } = (await api(hub.base, "/api/enroll", null, { name: "phone" })).body;
-    const pairing = await api(hub.base, "/api/servers/host-a/pairing", token, {});
-    expect(pairing.body.pairingUrl).toBe(`${hub.t3.url}/pair#token=PAIRCODE`);
-    expect(hub.t3.pairingRequests).toEqual([{ label: "Scope: phone", scopes: [...HUB_SCOPES] }]);
-    expect(HUB_SCOPES).not.toContain("environment:maintain");
+  it("mints phone pairing links with the metaserver's scopes, never environment:maintain", async () => {
+    await using metaserver = await setup();
+    const { token } = (await api(metaserver.base, "/api/enroll", null, { name: "phone" })).body;
+    const pairing = await api(metaserver.base, "/api/servers/host-a/pairing", token, {});
+    expect(pairing.body.pairingUrl).toBe(`${metaserver.t3.url}/pair#token=PAIRCODE`);
+    expect(metaserver.t3.pairingRequests).toEqual([
+      { label: "Scope: phone", scopes: [...METASERVER_SCOPES] },
+    ]);
+    expect(METASERVER_SCOPES).not.toContain("environment:maintain");
   });
 
   it("serves the fleet MCP: fleet tools plus proxied T3 tools that route by server", async () => {
-    await using hub = await setup();
-    const unauthorized = await fetch(`${hub.base}/mcp`, { method: "POST", body: "{}" });
+    await using metaserver = await setup();
+    const unauthorized = await fetch(`${metaserver.base}/mcp`, { method: "POST", body: "{}" });
     expect(unauthorized.status).toBe(401);
 
-    const { token } = hub.db.issueToken("agent", "host-a");
-    const client = new McpClient(`${hub.base}/mcp`, token);
+    const { token } = metaserver.db.issueToken("agent", "host-a");
+    const client = new T3Client(`${metaserver.base}/mcp`, token);
     const names = (await client.listTools()).map((tool) => tool.name);
     expect(names).toContain("fleet_servers_list");
     expect(names).toContain("fleet_thread_launch");
@@ -114,7 +127,7 @@ describe("fleet hub", () => {
       }),
     );
     expect(launched).toMatchObject({ threadId: "t-new" });
-    expect(hub.t3.calls.at(-1)).toEqual({
+    expect(metaserver.t3.calls.at(-1)).toEqual({
       tool: "t3_thread_launch",
       args: { projectId: "p1", title: "Hi", message: "x" },
     });
@@ -131,8 +144,8 @@ describe("fleet hub", () => {
   });
 
   it("finds services with SSH targets and update hints", async () => {
-    await using hub = await setup();
-    hub.db.replaceServices(
+    await using metaserver = await setup();
+    metaserver.db.replaceServices(
       "host-a",
       [
         {
@@ -148,37 +161,37 @@ describe("fleet hub", () => {
       ],
       null,
     );
-    const [found] = hub.fleet.findServices("RustDesk");
+    const [found] = metaserver.fleet.findServices("RustDesk");
     expect(found).toMatchObject({
       server: { id: "host-a", ssh: "ssh deploy@host-a.example.ts.net" },
       updateHint: "cd /opt/rustdesk && docker compose pull && docker compose up -d",
     });
-    expect(hub.fleet.findServices("nginx")).toEqual([]);
+    expect(metaserver.fleet.findServices("nginx")).toEqual([]);
   });
 
   it("pushes new pending requests and finished turns, but not on the first poll", async () => {
-    await using hub = await setup();
-    hub.db.enrollDevice("phone", null);
-    const device = hub.db.listDevices()[0]!;
-    hub.db.setPushToken(device.id, "a".repeat(64), "sandbox");
+    await using metaserver = await setup();
+    metaserver.db.enrollDevice("phone", null);
+    const device = metaserver.db.listDevices()[0]!;
+    metaserver.db.setPushToken(device.id, "a".repeat(64), "sandbox");
     const sent: PushMessage[] = [];
-    const watcher = new Watcher(hub.db, hub.fleet, async (_token, _env, message) => {
+    const watcher = new Watcher(metaserver.db, metaserver.fleet, async (_token, _env, message) => {
       sent.push(message);
       return { ok: true };
     });
 
-    hub.t3.state.threads = [
+    metaserver.t3.state.threads = [
       { threadId: "t1", title: "Old", status: "waiting", pendingRequestCount: 1 },
     ];
-    hub.t3.state.pending = [{ requestId: "r-old", summary: "old request" }];
+    metaserver.t3.state.pending = [{ requestId: "r-old", summary: "old request" }];
     await watcher.poll();
     expect(sent).toEqual([]);
 
-    hub.t3.state.threads = [
+    metaserver.t3.state.threads = [
       { threadId: "t1", title: "Old", status: "waiting", pendingRequestCount: 2 },
       { threadId: "t2", title: "Build", status: "running", pendingRequestCount: 0 },
     ];
-    hub.t3.state.pending = [
+    metaserver.t3.state.pending = [
       { requestId: "r-old", summary: "old request" },
       { requestId: "r-new", summary: "Run rm -rf build?" },
     ];
@@ -192,10 +205,10 @@ describe("fleet hub", () => {
       },
     ]);
 
-    hub.t3.state.threads = [
+    metaserver.t3.state.threads = [
       { threadId: "t2", title: "Build", status: "completed", pendingRequestCount: 0 },
     ];
-    hub.t3.state.pending = [];
+    metaserver.t3.state.pending = [];
     await watcher.poll();
     expect(sent.at(-1)).toEqual({
       title: "host-a: done",

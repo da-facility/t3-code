@@ -1,7 +1,7 @@
 import * as NodeCrypto from "node:crypto";
 
 import { type Fleet, ToolCallError } from "./fleet.ts";
-import type { McpTool } from "./mcpClient.ts";
+import type { McpTool } from "./t3Client.ts";
 
 /**
  * The fleet MCP: one endpoint every agent on every T3 host can call. It lists
@@ -190,7 +190,7 @@ export async function handleFleetMcp(
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: "fleet", version: "1" },
           instructions:
-            "Fleet hub tools. fleet_servers_list and fleet_service_find answer 'where does X run'; connect with your own SSH key. fleet_overview, then fleet_thread_launch / fleet_thread_send and fleet_thread_wait run work on another T3 server and return its result.",
+            "Fleet tools from the t3 metaserver. fleet_servers_list and fleet_service_find answer 'where does X run'; connect with your own SSH key. fleet_overview, then fleet_thread_launch / fleet_thread_send and fleet_thread_wait run work on another T3 server and return its result.",
         });
         break;
       }

@@ -1,6 +1,7 @@
 /**
- * Minimal MCP client for a T3 server's streamable-HTTP `/mcp` endpoint.
- * One session per server; re-initializes when the server forgets it.
+ * The t3 client: how the metaserver talks to a T3 server, over that server's
+ * streamable-HTTP `/mcp` endpoint. One session per server; re-initializes
+ * when the server forgets it.
  */
 
 export interface McpTool {
@@ -16,7 +17,7 @@ export interface McpToolResult {
   isError?: boolean;
 }
 
-export class McpError extends Error {
+export class T3ClientError extends Error {
   readonly status: number | undefined;
   constructor(message: string, status?: number) {
     super(message);
@@ -40,12 +41,12 @@ async function readJsonRpcResponse(response: Response, id: number): Promise<unkn
       const message = JSON.parse(data) as { id?: number };
       if (message.id === id) return message;
     }
-    throw new McpError("MCP stream ended without a response");
+    throw new T3ClientError("MCP stream ended without a response");
   }
   return text.length > 0 ? JSON.parse(text) : null;
 }
 
-export class McpClient {
+export class T3Client {
   private sessionId: string | null = null;
   private nextId = 1;
   private initializing: Promise<void> | null = null;
@@ -97,13 +98,13 @@ export class McpClient {
         params: {
           protocolVersion: PROTOCOL_VERSION,
           capabilities: {},
-          clientInfo: { name: "fleet-hub", version: "1" },
+          clientInfo: { name: "t3-metaserver", version: "1" },
         },
       },
       this.timeoutMs,
     );
     if (!response.ok) {
-      throw new McpError(`MCP initialize failed: HTTP ${response.status}`, response.status);
+      throw new T3ClientError(`MCP initialize failed: HTTP ${response.status}`, response.status);
     }
     this.sessionId = response.headers.get("mcp-session-id");
     await readJsonRpcResponse(response, id);
@@ -133,7 +134,7 @@ export class McpClient {
       }
       if (!response.ok) {
         const text = await response.text().catch(() => "");
-        throw new McpError(
+        throw new T3ClientError(
           `MCP ${method} failed: HTTP ${response.status} ${text.slice(0, 200)}`,
           response.status,
         );
@@ -142,10 +143,10 @@ export class McpClient {
         result?: T;
         error?: { message?: string };
       };
-      if (message?.error) throw new McpError(message.error.message ?? `MCP ${method} error`);
+      if (message?.error) throw new T3ClientError(message.error.message ?? `MCP ${method} error`);
       return message?.result as T;
     }
-    throw new McpError(`MCP ${method} failed after re-initializing`);
+    throw new T3ClientError(`MCP ${method} failed after re-initializing`);
   }
 
   async listTools(): Promise<McpTool[]> {

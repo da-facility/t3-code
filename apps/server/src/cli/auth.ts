@@ -249,7 +249,7 @@ const mcpClientIssueCommand = Command.make("issue", {
   tokenOnly: tokenOnlyFlag,
 }).pipe(
   Command.withDescription(
-    "Issue a bearer token for an MCP client of this server's /mcp endpoint, such as the fleet hub.",
+    "Issue a bearer token for an MCP client of this server's /mcp endpoint, such as the t3 metaserver.",
   ),
   Command.withHandler((flags) =>
     runWithEnvironmentAuth(

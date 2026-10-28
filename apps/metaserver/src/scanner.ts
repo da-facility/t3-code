@@ -3,10 +3,10 @@ import * as NodeChildProcess from "node:child_process";
 import { parseScan, SCAN_SCRIPT } from "@t3tools/fleet/scan";
 import type { RegistryServer } from "@t3tools/fleet/registry";
 
-import type { HubDb } from "./db.ts";
+import type { MetaserverDb } from "./db.ts";
 
 export interface ScanOptions {
-  /** The hub's own SSH private key. */
+  /** The metaserver's own SSH private key. */
   identityFile: string;
   knownHostsFile: string;
   timeoutMs?: number;
@@ -52,7 +52,7 @@ function runSsh(args: string[], stdin: string, timeoutMs: number) {
 }
 
 /** Scans one host read-only and replaces its services. Never throws; errors land on the server row. */
-export async function scanServer(db: HubDb, server: RegistryServer, options: ScanOptions) {
+export async function scanServer(db: MetaserverDb, server: RegistryServer, options: ScanOptions) {
   const result = await runSsh(sshArgs(server, options), SCAN_SCRIPT, options.timeoutMs ?? 60_000);
   if (!result.stdout.includes("@@fleet:end")) {
     const error = (result.stderr.trim() || `ssh exited with ${result.code}`)

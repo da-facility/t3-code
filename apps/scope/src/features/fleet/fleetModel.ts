@@ -1,9 +1,9 @@
 /**
- * Shapes the hub's /api responses for the Fleet screen. Pure, so it is tested
+ * Shapes the metaserver's /api responses for the Fleet screen. Pure, so it is tested
  * without React Native.
  */
 
-export interface HubDevice {
+export interface MetaserverDevice {
   readonly id: string;
   readonly name: string;
   readonly role: "owner" | "member";
@@ -13,7 +13,7 @@ export interface HubDevice {
   readonly lastSeenAt: string | null;
 }
 
-export interface HubServer {
+export interface MetaserverServer {
   readonly id: string;
   readonly address: string;
   readonly ssh: string;
@@ -27,7 +27,7 @@ export interface HubServer {
   };
 }
 
-export interface HubThread {
+export interface MetaserverThread {
   readonly serverId: string;
   readonly projectId: string;
   readonly projectTitle: string | null;
@@ -37,7 +37,7 @@ export interface HubThread {
   readonly updatedAt: string | null;
 }
 
-export interface HubPending {
+export interface MetaserverPending {
   readonly serverId: string;
   readonly threadId: string;
   readonly threadTitle: string | null;
@@ -45,17 +45,20 @@ export interface HubPending {
   readonly summary: string;
 }
 
-export interface HubOverview {
+export interface MetaserverOverview {
   readonly serverId: string;
   readonly ok: boolean;
   readonly error: string | null;
   readonly environment: { readonly environmentId?: string; readonly label?: string } | null;
-  readonly threads: ReadonlyArray<HubThread>;
-  readonly pending: ReadonlyArray<HubPending>;
+  readonly threads: ReadonlyArray<MetaserverThread>;
+  readonly pending: ReadonlyArray<MetaserverPending>;
 }
 
-/** Accepts a bare tailnet name (served over HTTPS by the hub's Caddy) or a full URL; plain `http://` defaults to the hub port. */
-export function normalizeHubUrl(input: string): string | null {
+/**
+ * Accepts a bare tailnet name (served over HTTPS by the metaserver's Caddy) or a full URL;
+ * plain `http://` defaults to the metaserver port.
+ */
+export function normalizeMetaserverUrl(input: string): string | null {
   const trimmed = input.trim();
   if (trimmed.length === 0) return null;
   const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
@@ -76,7 +79,7 @@ const ACTIVE = new Set(["preparing", "queued", "starting", "running"]);
 export type ServerHealth = "online" | "error" | "unlinked";
 
 export interface FleetServerRow {
-  readonly server: HubServer;
+  readonly server: MetaserverServer;
   readonly health: ServerHealth;
   readonly environmentId: string | null;
   readonly label: string;
@@ -90,23 +93,23 @@ export interface FleetSummary {
   readonly servers: ReadonlyArray<FleetServerRow>;
   /** Threads that need the user, newest first: listed questions plus threads waiting on an approval. */
   readonly attention: ReadonlyArray<
-    HubThread & { readonly summary: string; readonly requestId: string | null }
+    MetaserverThread & { readonly summary: string; readonly requestId: string | null }
   >;
-  readonly recent: ReadonlyArray<HubThread>;
+  readonly recent: ReadonlyArray<MetaserverThread>;
   /** Registry servers without T3, reachable over SSH. */
-  readonly others: ReadonlyArray<HubServer>;
+  readonly others: ReadonlyArray<MetaserverServer>;
 }
 
 const byUpdatedDesc = (a: { updatedAt: string | null }, b: { updatedAt: string | null }) =>
   (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "");
 
 export function summarizeFleet(
-  servers: ReadonlyArray<HubServer>,
-  overviews: ReadonlyArray<HubOverview>,
+  servers: ReadonlyArray<MetaserverServer>,
+  overviews: ReadonlyArray<MetaserverOverview>,
   recentLimit = 12,
 ): FleetSummary {
   const overviewById = new Map(overviews.map((overview) => [overview.serverId, overview]));
-  const hasT3 = (server: HubServer) => server.t3.linked || server.t3.url !== null;
+  const hasT3 = (server: MetaserverServer) => server.t3.linked || server.t3.url !== null;
   const rows = servers
     .filter(hasT3)
     .map((server): FleetServerRow => {

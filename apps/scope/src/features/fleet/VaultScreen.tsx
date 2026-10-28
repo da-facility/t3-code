@@ -7,7 +7,7 @@ import { AppText as Text } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
 import { GlassSurface } from "../../components/ui/GlassSurface";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
-import { type HubLink, hubRequest, useHubLink } from "./hubClient";
+import { type MetaserverLink, metaserverRequest, useMetaserverLink } from "./metaserverClient";
 import { scopeVault } from "./vaultNative";
 
 interface VaultStatus {
@@ -27,23 +27,23 @@ interface CredentialRequest {
 }
 
 /**
- * The approval screen. The hub's vault is unlocked only while this screen is
+ * The approval screen. The metaserver's vault is unlocked only while this screen is
  * open and sending heartbeats; leaving it, or the app going to the background,
- * locks the hub. Every credential use is confirmed here.
+ * locks the metaserver. Every credential use is confirmed here.
  */
 export function VaultScreen() {
-  const link = useHubLink();
+  const link = useMetaserverLink();
   if (!link) {
     return (
       <View className="flex-1 bg-screen" style={{ justifyContent: "center", padding: 24 }}>
-        <Text className="text-base text-foreground-muted">Connect to a hub first.</Text>
+        <Text className="text-base text-foreground-muted">Connect to a metaserver first.</Text>
       </View>
     );
   }
   return <VaultApproval link={link} />;
 }
 
-function VaultApproval({ link }: { readonly link: HubLink }) {
+function VaultApproval({ link }: { readonly link: MetaserverLink }) {
   const insets = useSafeAreaInsets();
   const [status, setStatus] = useState<VaultStatus | null>(null);
   const [requests, setRequests] = useState<CredentialRequest[]>([]);
@@ -54,7 +54,7 @@ function VaultApproval({ link }: { readonly link: HubLink }) {
   const lock = useCallback(async () => {
     if (!unlockedHere.current) return;
     unlockedHere.current = false;
-    await hubRequest(link, "/api/vault/lock", {}).catch(() => {});
+    await metaserverRequest(link, "/api/vault/lock", {}).catch(() => {});
   }, [link]);
 
   const poll = useCallback(async () => {
@@ -101,7 +101,7 @@ function VaultApproval({ link }: { readonly link: HubLink }) {
 
   const decide = (request: CredentialRequest, approve: boolean, itemId?: string) => {
     const body = itemId ? { approve, itemId } : { approve };
-    void hubRequest(link, `/api/vault/requests/${request.id}`, body).then(
+    void metaserverRequest(link, `/api/vault/requests/${request.id}`, body).then(
       () => setRequests((current) => current.filter((candidate) => candidate.id !== request.id)),
       (cause: unknown) => setMessage(describe(cause)),
     );
@@ -140,7 +140,7 @@ function VaultApproval({ link }: { readonly link: HubLink }) {
             {status === null
               ? "Checking…"
               : !status.configured
-                ? "Not set up on the hub"
+                ? "Not set up on the metaserver"
                 : status.unlockedByThisDevice
                   ? "Unlocked while this screen is open"
                   : status.unlocked
@@ -150,7 +150,7 @@ function VaultApproval({ link }: { readonly link: HubLink }) {
         </View>
         {status && !status.configured ? (
           <Text className="text-sm text-foreground-muted">
-            Run `fleet-hub vault setup` on the hub after registering this phone's key.
+            Run `t3-metaserver vault setup` on the metaserver after registering this phone's key.
           </Text>
         ) : null}
         {status && !status.hasWrappedKey ? (
@@ -220,12 +220,12 @@ const describe = (cause: unknown) => (cause instanceof Error ? cause.message : S
 // Async work lives outside components: React Compiler cannot compile try/finally in them.
 
 async function registerVaultKey(
-  link: HubLink,
+  link: MetaserverLink,
 ): Promise<{ status: VaultStatus; message: string } | { error: string }> {
   if (!scopeVault) return { error: "This build has no vault module." };
   try {
     const publicKey = await scopeVault.ensureKey();
-    const status = await hubRequest<VaultStatus>(link, "/api/vault/key", { publicKey });
+    const status = await metaserverRequest<VaultStatus>(link, "/api/vault/key", { publicKey });
     return {
       status,
       message: scopeVault.isHardwareBacked()
@@ -237,11 +237,13 @@ async function registerVaultKey(
   }
 }
 
-/** Face ID opens this phone's wrapped vault key and seals it to the hub's one-time key. */
-async function unlockVault(link: HubLink): Promise<{ status: VaultStatus } | { error: string }> {
+/** Face ID opens this phone's wrapped vault key and seals it to the metaserver's one-time key. */
+async function unlockVault(
+  link: MetaserverLink,
+): Promise<{ status: VaultStatus } | { error: string }> {
   if (!scopeVault) return { error: "This build has no vault module." };
   try {
-    const challenge = await hubRequest<{
+    const challenge = await metaserverRequest<{
       challengeId: string;
       publicKey: string;
       wrappedKey: { enc: string; ct: string };
@@ -252,9 +254,9 @@ async function unlockVault(link: HubLink): Promise<{ status: VaultStatus } | { e
       challenge.wrappedKey.ct,
       challenge.publicKey,
       challenge.challengeId,
-      "Unlock your 1Password vault on the hub",
+      "Unlock your 1Password vault on the metaserver",
     );
-    const status = await hubRequest<VaultStatus>(link, "/api/vault/unlock/finish", {
+    const status = await metaserverRequest<VaultStatus>(link, "/api/vault/unlock/finish", {
       challengeId: challenge.challengeId,
       sealedKey,
     });
@@ -266,14 +268,17 @@ async function unlockVault(link: HubLink): Promise<{ status: VaultStatus } | { e
 
 /** Status (a heartbeat while this phone holds the unlock) and the waiting requests. */
 async function pollVault(
-  link: HubLink,
+  link: MetaserverLink,
   unlockedHere: boolean,
 ): Promise<{ status: VaultStatus; requests: CredentialRequest[] } | { error: string }> {
   try {
     const status = unlockedHere
-      ? await hubRequest<VaultStatus>(link, "/api/vault/heartbeat", {})
-      : await hubRequest<VaultStatus>(link, "/api/vault");
-    const list = await hubRequest<{ requests: CredentialRequest[] }>(link, "/api/vault/requests");
+      ? await metaserverRequest<VaultStatus>(link, "/api/vault/heartbeat", {})
+      : await metaserverRequest<VaultStatus>(link, "/api/vault");
+    const list = await metaserverRequest<{ requests: CredentialRequest[] }>(
+      link,
+      "/api/vault/requests",
+    );
     return { status, requests: list.requests };
   } catch (cause) {
     return { error: describe(cause) };

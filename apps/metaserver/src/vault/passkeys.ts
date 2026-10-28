@@ -1,7 +1,7 @@
 import * as NodeCrypto from "node:crypto";
 
 /**
- * A software WebAuthn authenticator for the hub: ES256 passkeys with "none"
+ * A software WebAuthn authenticator for the metaserver: ES256 passkeys with "none"
  * attestation and the backup flags set (BE/BS), as a synced passkey would have.
  * Pure: storage and approval live in the vault.
  */

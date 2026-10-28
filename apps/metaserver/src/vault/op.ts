@@ -1,7 +1,7 @@
 import * as NodeChildProcess from "node:child_process";
 
 /**
- * The 1Password CLI as the hub uses it: manual sign-in with the master
+ * The 1Password CLI as the metaserver uses it: manual sign-in with the master
  * password on stdin, a session token held in memory, and `op signout`
  * (never `--forget`, which would make the next sign-in a new device and ask
  * for the second factor again).

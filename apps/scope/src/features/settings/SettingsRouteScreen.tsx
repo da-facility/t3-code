@@ -154,7 +154,7 @@ function environmentsRow(count: number): SettingsListRow {
 }
 
 const FLEET_ROWS: readonly SettingsListRow[] = [
-  { id: "SettingsFleet", icon: "server.rack", label: "Hub & Push", target: "SettingsFleet" },
+  { id: "SettingsFleet", icon: "server.rack", label: "Metaserver & Push", target: "SettingsFleet" },
   {
     id: "SettingsVault",
     icon: { ios: "lock.fill", android: "lock" },

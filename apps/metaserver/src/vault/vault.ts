@@ -1,6 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 
-import type { HubDb } from "../db.ts";
+import type { MetaserverDb } from "../db.ts";
 import {
   generateKeyPair,
   INFO_UNLOCK,
@@ -14,7 +14,7 @@ import { matchLogins, OpCli, type OpCredential } from "./op.ts";
 import { assertPasskey, createPasskey, type PasskeyRecord } from "./passkeys.ts";
 
 /**
- * The 1Password master password, encrypted with a vault key K the hub never stores.
+ * The 1Password master password, encrypted with a vault key K the metaserver never stores.
  * Phones hold K wrapped to their Secure Enclave key; a recovery code wraps it too.
  * An unlock brings K and an op session into memory while the phone sends heartbeats.
  */
@@ -143,7 +143,7 @@ export interface VaultOptions {
 }
 
 export class Vault {
-  private readonly db: HubDb;
+  private readonly db: MetaserverDb;
   private readonly op: OpCli;
   private readonly heartbeatTimeoutMs: number;
   private readonly requestTimeoutMs: number;
@@ -160,7 +160,7 @@ export class Vault {
   >();
   private watchdog: NodeJS.Timeout | null = null;
 
-  constructor(db: HubDb, op: OpCli, options: VaultOptions = {}) {
+  constructor(db: MetaserverDb, op: OpCli, options: VaultOptions = {}) {
     this.db = db;
     this.op = op;
     this.heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? 30_000;
@@ -222,7 +222,7 @@ export class Vault {
     };
   }
 
-  /** One-time setup on the hub. Returns the recovery code, which is never stored. */
+  /** One-time setup on the metaserver. Returns the recovery code, which is never stored. */
   async setup(password: string, account: string | null) {
     if (this.record())
       throw new VaultError(409, "The vault is already set up. Use `vault reset` first.");
@@ -301,7 +301,7 @@ export class Vault {
   }
 
   async startUnlock(deviceId: string) {
-    if (!this.record()) throw new VaultError(404, "The vault is not set up on the hub yet.");
+    if (!this.record()) throw new VaultError(404, "The vault is not set up on the metaserver yet.");
     if (!this.wrappedKeyFor(deviceId)) {
       throw new VaultError(
         409,

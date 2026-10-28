@@ -1,4 +1,4 @@
-import type { HubDb } from "../db.ts";
+import type { MetaserverDb } from "../db.ts";
 import type { RouteContext } from "../http.ts";
 import { HttpError } from "../http.ts";
 import type { Sealed } from "./hpke.ts";
@@ -10,7 +10,7 @@ const isSealed = (value: unknown): value is Sealed =>
   !!value && typeof (value as Sealed).enc === "string" && typeof (value as Sealed).ct === "string";
 
 /** Phone-facing vault routes under /api/vault. Every route needs an approved device. */
-export function vaultRoutes(db: HubDb, vault: Vault) {
+export function vaultRoutes(db: MetaserverDb, vault: Vault) {
   return async (context: RouteContext): Promise<boolean> => {
     const { method, path, send } = context;
     if (!path.startsWith("/api/vault")) return false;

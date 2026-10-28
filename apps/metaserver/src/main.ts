@@ -7,18 +7,18 @@ import * as NodeUtil from "node:util";
 import type { RegistryServerInput } from "@t3tools/fleet/registry";
 
 import { ApnsSender } from "./apns.ts";
-import { HubDb } from "./db.ts";
+import { MetaserverDb } from "./db.ts";
 import { Fleet } from "./fleet.ts";
-import { createHubServer } from "./http.ts";
+import { createMetaserverHttpServer } from "./http.ts";
 import { scanServer } from "./scanner.ts";
 import { OpCli } from "./vault/op.ts";
 import { vaultRoutes } from "./vault/routes.ts";
 import { Vault } from "./vault/vault.ts";
 import { Watcher, type PushFn } from "./watcher.ts";
 
-const USAGE = `fleet-hub <command>
+const USAGE = `t3-metaserver <command>
 
-  serve                                   Run the hub (HTTP API, fleet MCP, watcher)
+  serve                                   Run the metaserver (HTTP API, fleet MCP, watcher)
   server add <id> --address A [--user U] [--port N] [--key-name K] [--tag T]... [--t3-url URL]
   server import                           Upsert servers from a JSON array on stdin
   server list [--json]
@@ -27,8 +27,8 @@ const USAGE = `fleet-hub <command>
   unlink <id>
   token issue --label L [--server id]     Issue a fleet MCP token (printed once)
   token list | token revoke <id>
-  scan [<id>...] [--all]                  Scan hosts over SSH with the hub's key
-  pubkey                                  Print the hub's SSH public key (creates it once)
+  scan [<id>...] [--all]                  Scan hosts over SSH with the metaserver's key
+  pubkey                                  Print the metaserver's SSH public key (creates it once)
   device list | device approve <id> | device revoke <id>
   overview [--json]                       Threads and pending requests across linked servers
   call <server> <tool> [json-args]        Call a T3 tool on a linked server
@@ -37,13 +37,15 @@ const USAGE = `fleet-hub <command>
   vault recover                           Re-wrap the vault key for enrolled phones (code on stdin)
   vault request <url>                     Ask the phone to approve a credential (testing)
 
-Environment: FLEET_HUB_HOME (default /var/lib/fleet-hub), FLEET_HUB_HOST, FLEET_HUB_PORT (8780),
-FLEET_HUB_OP_BIN (default op), FLEET_HUB_OP_ACCOUNT (op account shorthand).
-APNs: put {"keyPath","keyId","teamId","topic"} in $FLEET_HUB_HOME/apns.json.`;
+Environment: T3_METASERVER_HOME (default /var/lib/t3-metaserver), T3_METASERVER_HOST,
+T3_METASERVER_PORT (8780), T3_METASERVER_OP_BIN (default op), T3_METASERVER_OP_ACCOUNT
+(op account shorthand).
+APNs: put {"keyPath","keyId","teamId","topic"} in $T3_METASERVER_HOME/apns.json.`;
 
-const home = process.env.FLEET_HUB_HOME ?? "/var/lib/fleet-hub";
+const home = process.env.T3_METASERVER_HOME ?? "/var/lib/t3-metaserver";
 const paths = {
-  db: NodePath.join(home, "hub.sqlite"),
+  db: NodePath.join(home, "metaserver.sqlite"),
+  legacyDb: NodePath.join(home, "hub.sqlite"),
   sshKey: NodePath.join(home, "ssh", "id_ed25519"),
   knownHosts: NodePath.join(home, "ssh", "known_hosts"),
   apns: NodePath.join(home, "apns.json"),
@@ -51,7 +53,14 @@ const paths = {
 
 function openDb() {
   NodeFS.mkdirSync(home, { recursive: true, mode: 0o700 });
-  const db = new HubDb(paths.db);
+  // Installs from before the rename keep their state in hub.sqlite.
+  if (NodeFS.existsSync(paths.legacyDb) && !NodeFS.existsSync(paths.db)) {
+    for (const suffix of ["-wal", "-shm", ""]) {
+      if (NodeFS.existsSync(paths.legacyDb + suffix))
+        NodeFS.renameSync(paths.legacyDb + suffix, paths.db + suffix);
+    }
+  }
+  const db = new MetaserverDb(paths.db);
   NodeFS.chmodSync(paths.db, 0o600);
   return db;
 }
@@ -63,7 +72,7 @@ function ensureSshKey() {
     NodeFS.mkdirSync(NodePath.dirname(paths.sshKey), { recursive: true, mode: 0o700 });
     NodeChildProcess.execFileSync(
       "ssh-keygen",
-      ["-t", "ed25519", "-N", "", "-C", "fleet-hub", "-f", paths.sshKey],
+      ["-t", "ed25519", "-N", "", "-C", "t3-metaserver", "-f", paths.sshKey],
       { stdio: "ignore" },
     );
   }
@@ -88,11 +97,11 @@ function loadPush(): PushFn | null {
 }
 
 function makeVault(
-  db: HubDb,
+  db: MetaserverDb,
   push: PushFn | null,
-  account: string | null = process.env.FLEET_HUB_OP_ACCOUNT ?? null,
+  account: string | null = process.env.T3_METASERVER_OP_ACCOUNT ?? null,
 ) {
-  return new Vault(db, new OpCli(process.env.FLEET_HUB_OP_BIN ?? "op", account), {
+  return new Vault(db, new OpCli(process.env.T3_METASERVER_OP_BIN ?? "op", account), {
     notify: (request, locked) => {
       if (!push) return;
       for (const device of db.listDevices()) {
@@ -109,7 +118,7 @@ function makeVault(
 }
 
 async function admin(path: string, body: unknown) {
-  const port = Number(process.env.FLEET_HUB_PORT ?? 8780);
+  const port = Number(process.env.T3_METASERVER_PORT ?? 8780);
   const response = await fetch(`http://127.0.0.1:${port}${path}`, {
     method: "POST",
     body: JSON.stringify(body),
@@ -152,7 +161,7 @@ async function main(argv: string[]) {
       const push = loadPush();
       const watcher = new Watcher(db, fleet, push ?? (async () => ({ ok: true })));
       const vault = makeVault(db, push);
-      const server = createHubServer({
+      const server = createMetaserverHttpServer({
         db,
         fleet,
         push,
@@ -178,7 +187,7 @@ async function main(argv: string[]) {
           if (path === "/admin/vault/lock")
             return vault.lock("operator").then(() => vault.status());
           if (path === "/admin/vault/request" && input.url) {
-            const credential = await vault.requestCredential(input.url, "fleet-hub cli");
+            const credential = await vault.requestCredential(input.url, "t3-metaserver cli");
             return credential
               ? {
                   approved: true,
@@ -198,12 +207,12 @@ async function main(argv: string[]) {
           throw new Error("Unknown admin route");
         },
       });
-      const host = process.env.FLEET_HUB_HOST ?? "0.0.0.0";
-      const port = Number(process.env.FLEET_HUB_PORT ?? 8780);
+      const host = process.env.T3_METASERVER_HOST ?? "0.0.0.0";
+      const port = Number(process.env.T3_METASERVER_PORT ?? 8780);
       server.listen(port, host, () => {
-        console.log(`fleet-hub listening on ${host}:${port} (push ${push ? "on" : "off"})`);
+        console.log(`t3-metaserver listening on ${host}:${port} (push ${push ? "on" : "off"})`);
       });
-      watcher.start(Number(process.env.FLEET_HUB_POLL_MS ?? 15_000));
+      watcher.start(Number(process.env.T3_METASERVER_POLL_MS ?? 15_000));
       const shutdown = () => {
         watcher.stop();
         server.close(() => {
@@ -354,11 +363,11 @@ async function main(argv: string[]) {
         const vault = makeVault(
           db,
           null,
-          values.account ?? process.env.FLEET_HUB_OP_ACCOUNT ?? null,
+          values.account ?? process.env.T3_METASERVER_OP_ACCOUNT ?? null,
         );
         const result = await vault.setup(
           password,
-          values.account ?? process.env.FLEET_HUB_OP_ACCOUNT ?? null,
+          values.account ?? process.env.T3_METASERVER_OP_ACCOUNT ?? null,
         );
         console.log("Vault ready. Recovery code (shown once; save it in 1Password and offline):\n");
         console.log(`  ${result.recoveryCode}\n`);

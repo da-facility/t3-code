@@ -19,48 +19,48 @@ import { useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
 import { useSelectWorkspaceTab } from "../workspace/useSelectWorkspaceTab";
 import {
   type FleetServerRow,
-  type HubDevice,
-  type HubOverview,
-  type HubServer,
-  type HubThread,
-  normalizeHubUrl,
+  type MetaserverDevice,
+  type MetaserverOverview,
+  type MetaserverServer,
+  type MetaserverThread,
+  normalizeMetaserverUrl,
   summarizeFleet,
 } from "./fleetModel";
 import {
-  enrollWithHub,
-  forgetHub,
-  type HubLink,
-  hubRequest,
-  loadHubLink,
-  useHubLink,
-} from "./hubClient";
+  enrollWithMetaserver,
+  forgetMetaserver,
+  type MetaserverLink,
+  metaserverRequest,
+  loadMetaserverLink,
+  useMetaserverLink,
+} from "./metaserverClient";
 import { scopeVault } from "./vaultNative";
 
 /**
- * The Fleet tab: servers, controllers and the rest of the registry, through the hub. Tapping a
- * server pairs this phone with it directly and opens it in the Workspace tab.
+ * The Fleet tab: servers, controllers and the rest of the registry, through the metaserver.
+ * Tapping a server pairs this phone with it directly and opens it in the Workspace tab.
  */
 export function FleetScreen() {
-  const link = useHubLink();
+  const link = useMetaserverLink();
   if (link === undefined) return <View className="flex-1 bg-screen" />;
-  if (link === null) return <HubSetup />;
+  if (link === null) return <MetaserverSetup />;
   return <FleetDashboard link={link} />;
 }
 
-const defaultHubUrl =
-  (Constants.expoConfig?.extra as { defaultHubUrl?: string | null } | undefined)?.defaultHubUrl ??
-  "";
+const defaultMetaserverUrl =
+  (Constants.expoConfig?.extra as { defaultMetaserverUrl?: string | null } | undefined)
+    ?.defaultMetaserverUrl ?? "";
 
-function HubSetup() {
-  const [url, setUrl] = useState(defaultHubUrl);
+function MetaserverSetup() {
+  const [url, setUrl] = useState(defaultMetaserverUrl);
   const [name, setName] = useState(Device.deviceName ?? "iPhone");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const enroll = async () => {
-    const normalized = normalizeHubUrl(url);
+    const normalized = normalizeMetaserverUrl(url);
     if (!normalized) {
-      setError("Enter the hub's tailnet address, like hub.example.ts.net.");
+      setError("Enter the metaserver's tailnet address, like metaserver.example.ts.net.");
       return;
     }
     setBusy(true);
@@ -85,21 +85,21 @@ function HubSetup() {
       <View style={{ gap: 6 }}>
         <Text className="text-4xl font-t3-bold text-foreground">Scope</Text>
         <Text className="text-base text-foreground-muted">
-          Connect to your fleet hub over Tailscale. The first phone becomes the owner; later phones
-          are approved from an enrolled one.
+          Connect to your t3 metaserver over Tailscale. The first phone becomes the owner; later
+          phones are approved from an enrolled one.
         </Text>
       </View>
       <GlassSurface style={{ padding: 16, gap: 12 }}>
-        <Text className="text-sm font-t3-medium text-foreground-muted">Hub address</Text>
+        <Text className="text-sm font-t3-medium text-foreground-muted">Metaserver address</Text>
         <AppTextInput
           className="rounded-xl border border-border px-3 py-3 text-base text-foreground"
           value={url}
           onChangeText={setUrl}
-          placeholder="hub.example.ts.net"
+          placeholder="metaserver.example.ts.net"
           autoCapitalize="none"
           autoCorrect={false}
           keyboardType="url"
-          accessibilityLabel="Hub address"
+          accessibilityLabel="Metaserver address"
         />
         <Text className="text-sm font-t3-medium text-foreground-muted">This phone's name</Text>
         <AppTextInput
@@ -109,7 +109,12 @@ function HubSetup() {
           accessibilityLabel="Device name"
         />
         {error ? <Text className="text-sm text-danger-foreground">{error}</Text> : null}
-        <Button label="Connect to hub" onPress={() => void enroll()} loading={busy} fullWidth />
+        <Button
+          label="Connect to metaserver"
+          onPress={() => void enroll()}
+          loading={busy}
+          fullWidth
+        />
       </GlassSurface>
     </ScrollView>
   );
@@ -117,13 +122,13 @@ function HubSetup() {
 
 interface FleetData {
   fetchedAt: number;
-  device: HubDevice;
-  servers: HubServer[];
-  overviews: HubOverview[];
-  devices: HubDevice[];
+  device: MetaserverDevice;
+  servers: MetaserverServer[];
+  overviews: MetaserverOverview[];
+  devices: MetaserverDevice[];
 }
 
-function useFleetData(link: HubLink) {
+function useFleetData(link: MetaserverLink) {
   const [data, setData] = useState<FleetData | null>(null);
   const [error, setError] = useState<{ status: number; message: string } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -157,7 +162,7 @@ function useFleetData(link: HubLink) {
   return { data, error, refreshing, refresh };
 }
 
-function FleetDashboard({ link }: { readonly link: HubLink }) {
+function FleetDashboard({ link }: { readonly link: MetaserverLink }) {
   const navigation = useNavigation();
   const workspace = useWorkspaceTabs();
   const selectTab = useSelectWorkspaceTab();
@@ -178,7 +183,7 @@ function FleetDashboard({ link }: { readonly link: HubLink }) {
     async (row: FleetServerRow): Promise<boolean> => {
       if (row.environmentId && connectedIds.has(row.environmentId)) return true;
       setConnecting(row.server.id);
-      const failure = await pairThroughHub(link, row, connectPairingUrl);
+      const failure = await pairThroughMetaserver(link, row, connectPairingUrl);
       setConnecting(null);
       if (failure) Dialog.alert("Could not connect", failure);
       return failure === null;
@@ -187,7 +192,7 @@ function FleetDashboard({ link }: { readonly link: HubLink }) {
   );
 
   const openThread = useCallback(
-    async (thread: HubThread) => {
+    async (thread: MetaserverThread) => {
       const row = summary?.servers.find((candidate) => candidate.server.id === thread.serverId);
       if (!row?.environmentId) return;
       if (!(await ensureConnected(row))) return;
@@ -233,7 +238,7 @@ function FleetDashboard({ link }: { readonly link: HubLink }) {
         <CenteredMessage
           title="This phone was revoked"
           body={error.message}
-          action={{ label: "Enroll again", onPress: () => void forgetHub() }}
+          action={{ label: "Enroll again", onPress: () => void forgetMetaserver() }}
         />
       );
     }
@@ -242,9 +247,9 @@ function FleetDashboard({ link }: { readonly link: HubLink }) {
     return (
       <CenteredMessage
         title="Waiting for approval"
-        body={`Approve “${data.device.name}” from an enrolled phone, or run \`fleet-hub device approve ${data.device.id}\` on the hub.`}
+        body={`Approve “${data.device.name}” from an enrolled phone, or run \`t3-metaserver device approve ${data.device.id}\` on the metaserver.`}
         action={{ label: "Check again", onPress: () => void refresh() }}
-        secondary={{ label: "Use a different hub", onPress: () => void forgetHub() }}
+        secondary={{ label: "Use a different metaserver", onPress: () => void forgetMetaserver() }}
       />
     );
   }
@@ -272,7 +277,7 @@ function FleetDashboard({ link }: { readonly link: HubLink }) {
           <Text className="text-sm text-foreground-muted">Loading…</Text>
         ) : summary.servers.length === 0 ? (
           <Text className="text-sm text-foreground-muted">
-            No T3 servers are linked yet. Run scripts/fleet/install with --hub to add one.
+            No T3 servers are linked yet. Run scripts/fleet/install with --metaserver to add one.
           </Text>
         ) : (
           summary.servers.map((row) => (
@@ -373,7 +378,7 @@ function ServerCard(props: {
 }
 
 /** A registry server without T3. Tapping copies its SSH command. */
-function OtherServerRow(props: { readonly server: HubServer }) {
+function OtherServerRow(props: { readonly server: MetaserverServer }) {
   const { server } = props;
   return (
     <Pressable
@@ -399,15 +404,15 @@ function OtherServerRow(props: { readonly server: HubServer }) {
 }
 
 function DeviceRow(props: {
-  readonly device: HubDevice;
+  readonly device: MetaserverDevice;
   readonly self: boolean;
-  readonly link: HubLink;
+  readonly link: MetaserverLink;
   readonly onChange: () => void;
 }) {
   const { device, link } = props;
   const act = async (action: "approve" | "revoke") => {
     try {
-      await hubRequest(link, `/api/devices/${device.id}/${action}`, {});
+      await metaserverRequest(link, `/api/devices/${device.id}/${action}`, {});
       props.onChange();
     } catch (cause) {
       Dialog.alert(
@@ -473,12 +478,12 @@ const describe = (cause: unknown) => (cause instanceof Error ? cause.message : S
 /** Enrolls, and registers the vault key at once when this phone became the owner. */
 async function enrollAndRegisterKey(url: string, name: string): Promise<string | null> {
   try {
-    const device = await enrollWithHub(url, name);
+    const device = await enrollWithMetaserver(url, name);
     // Later phones register their key from the Vault screen once approved.
     if (device.status === "approved" && scopeVault) {
       const publicKey = await scopeVault.ensureKey();
-      const link = await loadHubLink();
-      if (link) await hubRequest(link, "/api/vault/key", { publicKey }).catch(() => {});
+      const link = await loadMetaserverLink();
+      if (link) await metaserverRequest(link, "/api/vault/key", { publicKey }).catch(() => {});
     }
     return null;
   } catch (cause) {
@@ -487,18 +492,21 @@ async function enrollAndRegisterKey(url: string, name: string): Promise<string |
 }
 
 async function fetchFleet(
-  link: HubLink,
+  link: MetaserverLink,
   refresh: boolean,
 ): Promise<{ data: FleetData } | { error: { status: number; message: string } }> {
   try {
-    const { device } = await hubRequest<{ device: HubDevice }>(link, "/api/me");
+    const { device } = await metaserverRequest<{ device: MetaserverDevice }>(link, "/api/me");
     if (device.status !== "approved") {
       return { data: { fetchedAt: Date.now(), device, servers: [], overviews: [], devices: [] } };
     }
     const [servers, overview, devices] = await Promise.all([
-      hubRequest<{ servers: HubServer[] }>(link, "/api/servers"),
-      hubRequest<{ servers: HubOverview[] }>(link, `/api/overview${refresh ? "?refresh=1" : ""}`),
-      hubRequest<{ devices: HubDevice[] }>(link, "/api/devices"),
+      metaserverRequest<{ servers: MetaserverServer[] }>(link, "/api/servers"),
+      metaserverRequest<{ servers: MetaserverOverview[] }>(
+        link,
+        `/api/overview${refresh ? "?refresh=1" : ""}`,
+      ),
+      metaserverRequest<{ devices: MetaserverDevice[] }>(link, "/api/devices"),
     ]);
     return {
       data: {
@@ -516,9 +524,9 @@ async function fetchFleet(
   }
 }
 
-/** Pairs this phone with a server through a hub-minted link. Returns an error message or null. */
-async function pairThroughHub(
-  link: HubLink,
+/** Pairs this phone with a server through a metaserver-minted link. Returns an error message or null. */
+async function pairThroughMetaserver(
+  link: MetaserverLink,
   row: FleetServerRow,
   connect: (
     pairingUrl: string,
@@ -526,7 +534,7 @@ async function pairThroughHub(
   ) => Promise<AsyncResult.AsyncResult<unknown, unknown>>,
 ): Promise<string | null> {
   try {
-    const pairing = await hubRequest<{ pairingUrl: string }>(
+    const pairing = await metaserverRequest<{ pairingUrl: string }>(
       link,
       `/api/servers/${row.server.id}/pairing`,
       {},

@@ -1117,7 +1117,7 @@ const make = Effect.gen(function* () {
       worldName: CLIPBOARD_WORLD,
       runImmediately: true,
     });
-    // Fork: 1Password fill through the fleet hub, approved on the phone.
+    // Fork: 1Password fill through the t3 metaserver, approved on the phone.
     await installFleetCredentials(cdp).catch(constVoid);
   };
 

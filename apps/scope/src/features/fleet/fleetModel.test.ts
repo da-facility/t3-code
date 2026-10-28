@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  type HubOverview,
-  type HubServer,
-  normalizeHubUrl,
+  type MetaserverOverview,
+  type MetaserverServer,
+  normalizeMetaserverUrl,
   relativeTime,
   summarizeFleet,
 } from "./fleetModel";
 
-const server = (id: string, linked = true): HubServer => ({
+const server = (id: string, linked = true): MetaserverServer => ({
   id,
   address: `${id}.example.ts.net`,
   ssh: `ssh ${id}.example.ts.net`,
@@ -17,23 +17,29 @@ const server = (id: string, linked = true): HubServer => ({
   t3: { url: linked ? `http://${id}:3773` : null, linked, lastOkAt: null, lastError: null },
 });
 
-describe("normalizeHubUrl", () => {
-  it("defaults to HTTPS, and to the hub's port for plain HTTP", () => {
-    expect(normalizeHubUrl("hub.example.ts.net")).toBe("https://hub.example.ts.net");
-    expect(normalizeHubUrl("http://hub.example.ts.net")).toBe("http://hub.example.ts.net:8780");
-    expect(normalizeHubUrl(" http://hub:9000/ ")).toBe("http://hub:9000");
-    expect(normalizeHubUrl("https://hub.example.ts.net")).toBe("https://hub.example.ts.net");
+describe("normalizeMetaserverUrl", () => {
+  it("defaults to HTTPS, and to the metaserver's port for plain HTTP", () => {
+    expect(normalizeMetaserverUrl("metaserver.example.ts.net")).toBe(
+      "https://metaserver.example.ts.net",
+    );
+    expect(normalizeMetaserverUrl("http://metaserver.example.ts.net")).toBe(
+      "http://metaserver.example.ts.net:8780",
+    );
+    expect(normalizeMetaserverUrl(" http://metaserver:9000/ ")).toBe("http://metaserver:9000");
+    expect(normalizeMetaserverUrl("https://metaserver.example.ts.net")).toBe(
+      "https://metaserver.example.ts.net",
+    );
   });
 
   it("rejects what is not a URL", () => {
-    expect(normalizeHubUrl("")).toBeNull();
-    expect(normalizeHubUrl("ftp://hub")).toBeNull();
-    expect(normalizeHubUrl("http://")).toBeNull();
+    expect(normalizeMetaserverUrl("")).toBeNull();
+    expect(normalizeMetaserverUrl("ftp://metaserver")).toBeNull();
+    expect(normalizeMetaserverUrl("http://")).toBeNull();
   });
 });
 
 describe("summarizeFleet", () => {
-  const overviews: HubOverview[] = [
+  const overviews: MetaserverOverview[] = [
     {
       serverId: "host-a",
       ok: true,

@@ -32,9 +32,18 @@ T3 Code has 3 key app surfaces: **web**, **desktop**, and **mobile**.
 
 ## This fork (da-facility/t3-code)
 
-This is a public fork of pingdotgg/t3code that adds a fleet hub (`apps/hub`), the Scope mobile app (`apps/scope`), a service installer (`scripts/fleet/`) and fleet packages. Keep new work in new directories so upstream rebases stay small.
+This is a public fork of pingdotgg/t3code that adds the t3 metaserver (`apps/metaserver`), the Scope mobile app (`apps/scope`), a service installer (`scripts/fleet/`) and fleet packages. Keep new work in new directories so upstream rebases stay small.
 
-- **No PII, ever.** No hostnames, IP addresses, usernames, emails, SSH key names, tokens or tailnet names in code, commits, docs, test fixtures or screenshots. Use placeholders such as `host-a`, `user@host`, `100.64.0.1` and `example.ts.net`. Fleet data (servers, addresses, keys) lives only on the hub, never in the repo. Check every diff for this before committing.
+**Terminology.** Use these four terms for the fleet system:
+
+- **t3 server**: runs on a host and connects to the metaserver.
+- **t3 metaserver**: runs on the VPS and connects to the metaclient and to t3 servers via a t3 client (`apps/metaserver`, CLI `t3-metaserver`).
+- **t3 client**: the part of the t3 metaserver that connects to t3 servers (`apps/metaserver/src/t3Client.ts`).
+- **scope**: a t3 metaclient (`apps/scope`).
+
+"The hub" (`apps/hub`, `fleet-hub`) is the old name for the t3 metaserver. When the maintainer says something ambiguous like "server", "client" or "hub", map it to these terms, and ask which part they mean if it is still unclear.
+
+- **No PII, ever.** No hostnames, IP addresses, usernames, emails, SSH key names, tokens or tailnet names in code, commits, docs, test fixtures or screenshots. Use placeholders such as `host-a`, `user@host`, `100.64.0.1` and `example.ts.net`. Fleet data (servers, addresses, keys) lives only on the metaserver, never in the repo. Check every diff for this before committing.
 - `TODO.md` (the fleet spec and its decisions) and `MORNING.md` are intentional and tracked, even though the upstream rules below say not to commit plans.
 
 ## A note from Theo

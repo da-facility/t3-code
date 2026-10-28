@@ -1,10 +1,10 @@
 import type { RegistryServer, RegistryService } from "@t3tools/fleet/registry";
 
-import type { HubDb, Link } from "./db.ts";
-import { McpClient, type McpTool, type McpToolResult, toolResultValue } from "./mcpClient.ts";
+import type { MetaserverDb, Link } from "./db.ts";
+import { T3Client, type McpTool, type McpToolResult, toolResultValue } from "./t3Client.ts";
 
 /**
- * The hub's view of the fleet: the registry plus a live MCP session to every
+ * The metaserver's view of the fleet: the registry plus a live MCP session to every
  * linked T3 server. Agents and phones both go through this.
  */
 
@@ -27,11 +27,11 @@ export const PROXIED_TOOLS = new Set([
 ]);
 
 /**
- * Scopes the hub holds on each T3 server and hands on to phones. Everything a
+ * Scopes the metaserver holds on each T3 server and hands on to phones. Everything a
  * client normally gets except `environment:maintain` (no remote updates) and
  * the T3 Connect relay scopes. The installer requests the same list.
  */
-export const HUB_SCOPES = [
+export const METASERVER_SCOPES = [
   "orchestration:read",
   "orchestration:operate",
   "settings:write",
@@ -101,25 +101,25 @@ export class ToolCallError extends Error {
 }
 
 export class Fleet {
-  private readonly db: HubDb;
+  private readonly db: MetaserverDb;
   private readonly fetchImpl: typeof fetch;
-  private readonly clients = new Map<string, { link: Link; client: McpClient }>();
+  private readonly clients = new Map<string, { link: Link; client: T3Client }>();
   private toolCatalog: { tools: McpTool[]; at: number } | null = null;
   private readonly overviews = new Map<string, ServerOverview>();
 
-  constructor(db: HubDb, fetchImpl: typeof fetch = fetch) {
+  constructor(db: MetaserverDb, fetchImpl: typeof fetch = fetch) {
     this.db = db;
     this.fetchImpl = fetchImpl;
   }
 
-  client(serverId: string): McpClient {
+  client(serverId: string): T3Client {
     const link = this.db.getLink(serverId);
-    if (!link) throw new Error(`Server '${serverId}' is not linked to the hub.`);
+    if (!link) throw new Error(`Server '${serverId}' is not linked to the metaserver.`);
     const cached = this.clients.get(serverId);
     if (cached && cached.link.mcpToken === link.mcpToken && cached.link.t3Url === link.t3Url) {
       return cached.client;
     }
-    const client = new McpClient(new URL("/mcp", link.t3Url).href, link.mcpToken, this.fetchImpl);
+    const client = new T3Client(new URL("/mcp", link.t3Url).href, link.mcpToken, this.fetchImpl);
     this.clients.set(serverId, { link, client });
     return client;
   }
@@ -187,11 +187,11 @@ export class Fleet {
   /** Mints a one-time pairing link on a linked server, for a phone to connect to it directly. */
   async mintPairingLink(serverId: string, label: string) {
     const link = this.db.getLink(serverId);
-    if (!link) throw new Error(`Server '${serverId}' is not linked to the hub.`);
+    if (!link) throw new Error(`Server '${serverId}' is not linked to the metaserver.`);
     const response = await this.fetchImpl(new URL("/api/auth/pairing-token", link.t3Url), {
       method: "POST",
       headers: { authorization: `Bearer ${link.bearerToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ label, scopes: HUB_SCOPES }),
+      body: JSON.stringify({ label, scopes: METASERVER_SCOPES }),
       signal: AbortSignal.timeout(15_000),
     });
     const text = await response.text();

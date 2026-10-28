@@ -2,7 +2,7 @@ Pod::Spec.new do |s|
   s.name           = 'ScopeVault'
   s.version        = '1.0.0'
   s.summary        = 'Secure Enclave key and HPKE for the Scope vault.'
-  s.description    = 'Holds a P-256 key in the Secure Enclave (software key on the simulator) and re-seals the vault key to the hub.'
+  s.description    = 'Holds a P-256 key in the Secure Enclave (software key on the simulator) and re-seals the vault key to the metaserver.'
   s.author         = 'da-facility'
   s.homepage       = 'https://github.com/da-facility/t3-code'
   s.platforms      = { :ios => '18.0' }

@@ -7,18 +7,18 @@ import * as Dialog from "../../components/ui/Dialog";
 import { GlassSurface } from "../../components/ui/GlassSurface";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { Section } from "./FleetScreen";
-import { forgetHub, type HubLink, useHubLink } from "./hubClient";
-import { registerPushWithHub, sendTestPush } from "./push";
+import { forgetMetaserver, type MetaserverLink, useMetaserverLink } from "./metaserverClient";
+import { registerPushWithMetaserver, sendTestPush } from "./push";
 
-/** Settings → Hub & push: this phone's hub connection and its notifications. */
+/** Settings → Metaserver & push: this phone's metaserver connection and its notifications. */
 export function FleetSettingsScreen() {
-  const link = useHubLink();
+  const link = useMetaserverLink();
   if (link === undefined) return <View className="flex-1 bg-screen" />;
   if (link === null) {
     return (
       <View className="flex-1 bg-screen" style={{ padding: 24 }}>
         <Text className="text-base text-foreground-muted">
-          This phone is not connected to a hub. Connect from the Fleet tab.
+          This phone is not connected to a metaserver. Connect from the Fleet tab.
         </Text>
       </View>
     );
@@ -26,11 +26,11 @@ export function FleetSettingsScreen() {
   return <FleetSettings link={link} />;
 }
 
-function FleetSettings({ link }: { readonly link: HubLink }) {
+function FleetSettings({ link }: { readonly link: MetaserverLink }) {
   const [pushState, setPushState] = useState<string | null>(null);
 
   const enablePush = () => {
-    void registerPushWithHub(link).then(
+    void registerPushWithMetaserver(link).then(
       (result) =>
         setPushState(
           result === "registered" ? "Push is on for this phone." : `Push not enabled (${result}).`,
@@ -49,11 +49,11 @@ function FleetSettings({ link }: { readonly link: HubLink }) {
 
   const disconnect = () =>
     Dialog.confirm({
-      title: "Disconnect from the hub?",
-      message: "This phone forgets its hub token. Servers stay paired.",
+      title: "Disconnect from the metaserver?",
+      message: "This phone forgets its metaserver token. Servers stay paired.",
       confirmText: "Disconnect",
       destructive: true,
-      onConfirm: () => void forgetHub(),
+      onConfirm: () => void forgetMetaserver(),
     });
 
   return (
@@ -62,7 +62,7 @@ function FleetSettings({ link }: { readonly link: HubLink }) {
       contentInsetAdjustmentBehavior="automatic"
       contentContainerStyle={{ padding: 16, paddingBottom: 32, gap: 18 }}
     >
-      <Section title="Hub">
+      <Section title="Metaserver">
         <GlassSurface style={{ padding: 14 }}>
           <Text className="text-base text-foreground" selectable>
             {link.url.replace(/^https?:\/\//, "")}
@@ -80,7 +80,7 @@ function FleetSettings({ link }: { readonly link: HubLink }) {
       </Section>
       <Section title="This phone">
         <View style={{ flexDirection: "row" }}>
-          <Button label="Disconnect from hub" tone="danger" onPress={disconnect} />
+          <Button label="Disconnect from metaserver" tone="danger" onPress={disconnect} />
         </View>
       </Section>
     </ScrollView>

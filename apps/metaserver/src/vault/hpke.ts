@@ -3,7 +3,7 @@ import { Aes256Gcm, CipherSuite, DhkemP256HkdfSha256, HkdfSha256 } from "@hpke/c
 /**
  * HPKE base mode, DHKEM(P-256, HKDF-SHA256) + HKDF-SHA256 + AES-256-GCM: the
  * suite CryptoKit calls `P256_SHA256_AES_GCM_256`, so the phone's Secure
- * Enclave key and the hub interoperate. Keys and `enc` are uncompressed SEC1
+ * Enclave key and the metaserver interoperate. Keys and `enc` are uncompressed SEC1
  * points (CryptoKit's x963Representation), base64 on the wire.
  */
 

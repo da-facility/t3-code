@@ -2,9 +2,9 @@
 import type { CDPSession } from "playwright-core";
 
 /**
- * Fork: an isolated-world script spots a login form per frame and calls a CDP binding; the hub
- * asks the phone and an approved login is filled and submitted. Off unless the installer set
- * FLEET_HUB_URL and FLEET_HUB_TOKEN in the service environment.
+ * Fork: an isolated-world script spots a login form per frame and calls a CDP binding; the t3
+ * metaserver asks the phone and an approved login is filled and submitted. Off unless the
+ * installer set T3_METASERVER_URL and T3_METASERVER_TOKEN in the service environment.
  */
 
 const WORLD = "t3-fleet-credentials";
@@ -12,8 +12,8 @@ const BINDING = "__t3FleetCredentials";
 const PASSKEY_BINDING = "__t3FleetPasskey";
 /** One phone prompt per site per window, however often the page re-renders its form. */
 const ASK_INTERVAL_MS = 2 * 60_000;
-/** The hub waits up to two minutes for the phone. */
-const HUB_TIMEOUT_MS = 150_000;
+/** The metaserver waits up to two minutes for the phone. */
+const METASERVER_TIMEOUT_MS = 150_000;
 
 const FLEET_CREDENTIAL_SCRIPT = `(() => {
   if (globalThis.__t3FleetFill) return;
@@ -154,14 +154,14 @@ const FLEET_PASSKEY_SCRIPT = `(() => {
   }
 })()`;
 
-export interface FleetHubConfig {
+export interface MetaserverConfig {
   readonly url: string;
   readonly token: string;
 }
 
-export function fleetHubConfig(env: NodeJS.ProcessEnv = process.env): FleetHubConfig | null {
-  const url = env.FLEET_HUB_URL?.trim().replace(/\/+$/, "");
-  const token = env.FLEET_HUB_TOKEN?.trim();
+export function metaserverConfig(env: NodeJS.ProcessEnv = process.env): MetaserverConfig | null {
+  const url = env.T3_METASERVER_URL?.trim().replace(/\/+$/, "");
+  const token = env.T3_METASERVER_TOKEN?.trim();
   return url && token ? { url, token } : null;
 }
 
@@ -178,29 +178,32 @@ export type PasskeySource = (
   request: Record<string, unknown> & { origin: string },
 ) => Promise<unknown | null>;
 
-function hubPasskeySource(hub: FleetHubConfig, fetchImpl: typeof fetch = fetch): PasskeySource {
+function metaserverPasskeySource(
+  metaserver: MetaserverConfig,
+  fetchImpl: typeof fetch = fetch,
+): PasskeySource {
   return async (op, request) => {
-    const response = await fetchImpl(`${hub.url}/passkeys/${op}`, {
+    const response = await fetchImpl(`${metaserver.url}/passkeys/${op}`, {
       method: "POST",
-      headers: { authorization: `Bearer ${hub.token}`, "content-type": "application/json" },
+      headers: { authorization: `Bearer ${metaserver.token}`, "content-type": "application/json" },
       body: JSON.stringify(request),
-      signal: AbortSignal.timeout(HUB_TIMEOUT_MS),
+      signal: AbortSignal.timeout(METASERVER_TIMEOUT_MS),
     }).catch(() => null);
     if (!response?.ok) return null;
     return response.json().catch(() => null);
   };
 }
 
-export function hubCredentialSource(
-  hub: FleetHubConfig,
+export function metaserverCredentialSource(
+  metaserver: MetaserverConfig,
   fetchImpl: typeof fetch = fetch,
 ): CredentialSource {
   return async (url) => {
-    const response = await fetchImpl(`${hub.url}/credentials`, {
+    const response = await fetchImpl(`${metaserver.url}/credentials`, {
       method: "POST",
-      headers: { authorization: `Bearer ${hub.token}`, "content-type": "application/json" },
+      headers: { authorization: `Bearer ${metaserver.token}`, "content-type": "application/json" },
       body: JSON.stringify({ url }),
-      signal: AbortSignal.timeout(HUB_TIMEOUT_MS),
+      signal: AbortSignal.timeout(METASERVER_TIMEOUT_MS),
     }).catch(() => null);
     if (!response?.ok) return null;
     const body = (await response.json().catch(() => null)) as FleetCredential | null;
@@ -232,13 +235,13 @@ const sharedGate = makeAskGate();
 export async function installFleetCredentials(
   cdp: CDPSession,
   source: CredentialSource | null = (() => {
-    const hub = fleetHubConfig();
-    return hub ? hubCredentialSource(hub) : null;
+    const metaserver = metaserverConfig();
+    return metaserver ? metaserverCredentialSource(metaserver) : null;
   })(),
   gate: (url: string) => boolean = sharedGate,
   passkeys: PasskeySource | null = (() => {
-    const hub = fleetHubConfig();
-    return hub ? hubPasskeySource(hub) : null;
+    const metaserver = metaserverConfig();
+    return metaserver ? metaserverPasskeySource(metaserver) : null;
   })(),
 ) {
   if (!source && !passkeys) return;

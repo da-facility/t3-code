@@ -425,7 +425,7 @@ const SETTINGS_SCREENS = {
   SettingsFleet: createNativeStackScreen({
     screen: FleetSettingsScreen,
     linking: "settings/fleet",
-    options: { ...SETTINGS_PAGE_OPTIONS, title: "Hub & Push" },
+    options: { ...SETTINGS_PAGE_OPTIONS, title: "Metaserver & Push" },
   }),
   SettingsVault: createNativeStackScreen({
     screen: VaultScreen,

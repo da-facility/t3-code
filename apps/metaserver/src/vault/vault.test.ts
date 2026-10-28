@@ -5,7 +5,7 @@ import * as NodePath from "node:path";
 
 import { describe, expect, it } from "@effect/vitest";
 
-import { HubDb } from "../db.ts";
+import { MetaserverDb } from "../db.ts";
 import { generateKeyPair, INFO_UNLOCK, INFO_WRAPPED_KEY, open, seal } from "./hpke.ts";
 import { OpCli } from "./op.ts";
 import { Vault } from "./vault.ts";
@@ -15,7 +15,7 @@ const PASSWORD = "correct horse battery staple";
 const encode = (text: string) => new TextEncoder().encode(text);
 
 /** A phone with a software key standing in for the Secure Enclave. */
-async function makePhone(db: HubDb, name: string) {
+async function makePhone(db: MetaserverDb, name: string) {
   const { device } = db.enrollDevice(name, null);
   const { keyPair, publicKey } = await generateKeyPair();
   db.setDevicePublicKey(device.id, publicKey);
@@ -71,7 +71,7 @@ function setup() {
       },
     ]),
   ]);
-  const db = new HubDb(NodePath.join(dir, "hub.sqlite"));
+  const db = new MetaserverDb(NodePath.join(dir, "metaserver.sqlite"));
   let now = 1_000_000;
   const vault = new Vault(db, new OpCli(process.execPath, "my", env), {
     now: () => now,

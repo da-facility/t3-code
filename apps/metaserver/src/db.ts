@@ -4,9 +4,9 @@ import * as NodeSqlite from "node:sqlite";
 import type { RegistryServer, RegistryServerInput, RegistryService } from "@t3tools/fleet/registry";
 
 /**
- * Hub state. One SQLite file, owned by root with mode 600. Credentials for
- * T3 servers are stored as-is because the hub must present them; tokens the
- * hub hands out (fleet MCP, devices) are stored only as SHA-256 hashes.
+ * Metaserver state. One SQLite file, owned by root with mode 600. Credentials for
+ * T3 servers are stored as-is because the metaserver must present them; tokens the
+ * metaserver hands out (fleet MCP, devices) are stored only as SHA-256 hashes.
  */
 
 const MIGRATIONS = [
@@ -172,7 +172,7 @@ const toDevice = (row: Row): Device => ({
   lastSeenAt: str(row.last_seen_at),
 });
 
-export class HubDb {
+export class MetaserverDb {
   readonly db: NodeSqlite.DatabaseSync;
   private readonly now: () => Date;
 

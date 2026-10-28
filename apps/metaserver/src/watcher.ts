@@ -1,4 +1,4 @@
-import type { HubDb } from "./db.ts";
+import type { MetaserverDb } from "./db.ts";
 import type { Fleet, ServerOverview } from "./fleet.ts";
 import type { PushMessage, PushResult } from "./apns.ts";
 
@@ -17,7 +17,7 @@ const FINISHED = new Set(["completed", "failed", "interrupted", "cancelled"]);
  * poll after start only records state, so a restart never replays old alerts.
  */
 export class Watcher {
-  private readonly db: HubDb;
+  private readonly db: MetaserverDb;
   private readonly fleet: Fleet;
   private readonly push: PushFn;
   private readonly statuses = new Map<string, string>();
@@ -25,7 +25,7 @@ export class Watcher {
   private timer: NodeJS.Timeout | null = null;
   private running: Promise<void> | null = null;
 
-  constructor(db: HubDb, fleet: Fleet, push: PushFn) {
+  constructor(db: MetaserverDb, fleet: Fleet, push: PushFn) {
     this.db = db;
     this.fleet = fleet;
     this.push = push;

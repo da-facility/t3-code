@@ -9,7 +9,7 @@ interface ScopeVaultNative {
     deviceId: string,
     wrappedEnc: string,
     wrappedCt: string,
-    hubPublicKey: string,
+    metaserverPublicKey: string,
     challengeId: string,
     reason: string,
   ): Promise<{ enc: string; ct: string }>;

@@ -853,7 +853,7 @@ const layerMakeServer = Layer.unwrap(
       : Layer.empty;
     const layerCloudDesiredLinkReconcile = Layer.effectDiscard(
       Effect.gen(function* () {
-        // Fork: T3 Connect is never started; the fleet hub over Tailscale replaces it.
+        // Fork: T3 Connect is never started; the t3 metaserver over Tailscale replaces it.
         if (FLEET_CONNECT_DISABLED) {
           return yield* Deferred.succeed(cloudLinkParked, undefined).pipe(Effect.orDie);
         }

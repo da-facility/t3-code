@@ -2,7 +2,7 @@ import * as NodeHttp from "node:http";
 import * as NodeNet from "node:net";
 
 /**
- * A stand-in T3 server for hub tests: a streamable-HTTP MCP endpoint with a
+ * A stand-in T3 server for metaserver tests: a streamable-HTTP MCP endpoint with a
  * few orchestration tools and the pairing-token route.
  */
 export interface FakeT3 {

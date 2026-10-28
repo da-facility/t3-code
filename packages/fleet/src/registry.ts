@@ -2,16 +2,16 @@ import * as Schema from "effect/Schema";
 
 /**
  * The fleet registry: every SSH-reachable machine, T3 or not. Only the schema
- * lives in the repo; the rows live on the hub.
+ * lives in the repo; the rows live on the metaserver.
  */
 
 export const ServerSource = Schema.Literals(["ssh-config", "tailscale", "ansible", "manual"]);
 export type ServerSource = typeof ServerSource.Type;
 
 export const RegistryServer = Schema.Struct({
-  /** Stable slug, unique on the hub (e.g. `host-a`). */
+  /** Stable slug, unique on the metaserver (e.g. `host-a`). */
   id: Schema.String,
-  /** SSH host name or IP the hub and agents connect to. */
+  /** SSH host name or IP the metaserver and agents connect to. */
   address: Schema.String,
   user: Schema.NullOr(Schema.String),
   port: Schema.Number,
@@ -46,7 +46,7 @@ export const RegistryService = Schema.Struct({
 });
 export type RegistryService = typeof RegistryService.Type;
 
-/** A server row as the importer proposes it, before the hub assigns defaults. */
+/** A server row as the importer proposes it, before the metaserver assigns defaults. */
 export const RegistryServerInput = Schema.Struct({
   id: Schema.String,
   address: Schema.String,
