@@ -63,15 +63,10 @@ The macOS path (launchd, logged-in GUI session check) is written but untested, b
 ### 6. Scope (the iPhone app)
 
 - Bundle id `io.dafacility.fleetscope`, with a new icon (`apps/scope/assets/scope/icon.png`, plus the iOS set in `assets/scope/ios/`).
-- Opens on **Fleet**:
-  - enroll with the hub;
-  - servers with health and thread counts;
-  - threads that need you;
-  - recent threads across the fleet;
-  - devices (approve or revoke);
-  - push enable and test.
-- Tapping a server or thread pairs the phone with that T3 server through a hub-minted link, then opens the existing T3 workspace UI. Approvals happen there over the direct connection.
-- **Vault** screen: register the phone's Secure Enclave key, unlock with Face ID (unlocked only while the screen is open, with a heartbeat), and approve or deny each credential request.
+- Three tabs: **Fleet**, **Workspace** (T3's chats) and **Settings**.
+  - **Fleet** lists the T3 servers (tap one to pair and open it in Workspace), the phones controlling the fleet (approve or revoke), and the other registry servers (tap to copy their SSH command).
+  - **Settings → Fleet** holds **Hub & Push** (push enable and test, disconnect) and **Vault**.
+- **Vault** (Settings → Fleet → Vault): register the phone's Secure Enclave key, unlock with Face ID (unlocked only while the screen is open, with a heartbeat), and approve or deny each credential request.
 - Built and signed for development, published to Selfstore as **Scope `v1.0.0-b3`** (`/a/scope` on your Selfstore; the link also arrived by Pushover). Skip `v1.0.0-b2`: it crashes on the Fleet screen once data loads. Lint caught an API that Hermes lacks; it is fixed in b3.
 - Tested so far:
   - **Launches in the simulator** and shows the setup screen.

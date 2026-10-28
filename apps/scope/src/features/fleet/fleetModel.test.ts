@@ -92,6 +92,7 @@ describe("summarizeFleet", () => {
       ["host-b", "error", 0, 0],
     ]);
     expect(summary.servers[0]!.environmentId).toBe("env-a");
+    expect(summary.others.map((other) => other.id)).toEqual(["host-c"]);
   });
 
   it("lists waiting threads as needing approval even when no question is listed", () => {

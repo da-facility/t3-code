@@ -153,6 +153,16 @@ function environmentsRow(count: number): SettingsListRow {
   };
 }
 
+const FLEET_ROWS: readonly SettingsListRow[] = [
+  { id: "SettingsFleet", icon: "server.rack", label: "Hub & Push", target: "SettingsFleet" },
+  {
+    id: "SettingsVault",
+    icon: { ios: "lock.fill", android: "lock" },
+    label: "Vault",
+    target: "SettingsVault",
+  },
+];
+
 function SettingsList(props: { readonly connections: readonly SettingsListRow[] }) {
   // UIKit's scroll-edge material takes the scroll view's own color; like the chat list, match
   // the sidebar's surface so the bar doesn't darken over content at rest.
@@ -164,7 +174,12 @@ function SettingsList(props: { readonly connections: readonly SettingsListRow[] 
   const overflowRows = useOverflowRows();
   const indexSections = useSettingsIndexSections();
   const sections = filterSettingsSections(
-    [{ rows: overflowRows }, { title: "Connections", rows: props.connections }, ...indexSections],
+    [
+      { rows: overflowRows },
+      { title: "Fleet", rows: FLEET_ROWS },
+      { title: "Connections", rows: props.connections },
+      ...indexSections,
+    ],
     query,
   );
 

@@ -9,6 +9,9 @@ import {
   workspaceUsesColumns,
 } from "./workspace-tabs-state";
 
+const chatsState = () =>
+  workspaceTabsReducer(initialWorkspaceTabsState(), { type: "select", tab: "threads" });
+
 describe("compact list clearance", () => {
   it.each([
     { bottomInset: 34, keyboardHeight: 300, clearance: 380 },
@@ -50,21 +53,31 @@ describe("Duo list clearance", () => {
 
 describe("workspace root navigation", () => {
   it("pairs Settings, chats and pull requests with a detail column, and keeps Usage one page", () => {
+    expect(workspaceUsesColumns("fleet")).toBe(false);
     expect(workspaceUsesColumns("usage")).toBe(false);
     expect(workspaceUsesColumns("usage", true)).toBe(true);
     expect(workspaceUsesColumns("threads")).toBe(true);
     expect(workspaceUsesColumns("pullRequests")).toBe(true);
   });
 
+  it("opens on Fleet", () => {
+    expect(initialWorkspaceTabsState().selectedTab).toBe("fleet");
+  });
+
   it("keeps the registered defaults while customization is unavailable", () => {
-    expect(resolveWorkspaceTabOrder(undefined)).toEqual(["threads", "pullRequests", "usage"]);
+    expect(resolveWorkspaceTabOrder(undefined)).toEqual([
+      "fleet",
+      "threads",
+      "pullRequests",
+      "usage",
+    ]);
     expect(resolveWorkspaceTabOrder(["home", "usage", "issues", "threads"])).toEqual(
       resolveWorkspaceTabOrder(undefined),
     );
   });
 
   it("retains separate queries and positions across tabs, and cancels only the current search", () => {
-    let state = initialWorkspaceTabsState();
+    let state = chatsState();
     state = workspaceTabsReducer(state, { type: "scroll", tab: "threads", offset: 640 });
     state = workspaceTabsReducer(state, { type: "search" });
     state = workspaceTabsReducer(state, { type: "query", query: "keyboard" });
@@ -95,7 +108,7 @@ describe("workspace root navigation", () => {
   });
 
   it("clear keeps search active without losing the position cancel restores", () => {
-    let state = initialWorkspaceTabsState();
+    let state = chatsState();
     state = workspaceTabsReducer(state, { type: "scroll", tab: "threads", offset: 500 });
     state = workspaceTabsReducer(state, { type: "search" });
     state = workspaceTabsReducer(state, { type: "query", query: "diff" });
@@ -131,7 +144,7 @@ describe("workspace root navigation", () => {
   });
 
   it("a blur from the previous native tab cannot open search in the selected tab", () => {
-    let state = workspaceTabsReducer(initialWorkspaceTabsState(), { type: "search" });
+    let state = workspaceTabsReducer(chatsState(), { type: "search" });
     state = workspaceTabsReducer(state, { type: "query", query: "keyboard" });
     state = workspaceTabsReducer(state, { type: "select", tab: "pullRequests" });
     state = workspaceTabsReducer(state, { type: "expand", tab: "threads" });

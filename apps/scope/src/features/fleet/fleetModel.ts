@@ -93,6 +93,8 @@ export interface FleetSummary {
     HubThread & { readonly summary: string; readonly requestId: string | null }
   >;
   readonly recent: ReadonlyArray<HubThread>;
+  /** Registry servers without T3, reachable over SSH. */
+  readonly others: ReadonlyArray<HubServer>;
 }
 
 const byUpdatedDesc = (a: { updatedAt: string | null }, b: { updatedAt: string | null }) =>
@@ -104,8 +106,9 @@ export function summarizeFleet(
   recentLimit = 12,
 ): FleetSummary {
   const overviewById = new Map(overviews.map((overview) => [overview.serverId, overview]));
+  const hasT3 = (server: HubServer) => server.t3.linked || server.t3.url !== null;
   const rows = servers
-    .filter((server) => server.t3.linked || server.t3.url !== null)
+    .filter(hasT3)
     .map((server): FleetServerRow => {
       const overview = overviewById.get(server.id);
       const threads = overview?.threads ?? [];
@@ -149,6 +152,7 @@ export function summarizeFleet(
       .filter((thread) => thread.status !== "waiting")
       .sort(byUpdatedDesc)
       .slice(0, recentLimit),
+    others: servers.filter((server) => !hasT3(server)).sort((a, b) => a.id.localeCompare(b.id)),
   };
 }
 

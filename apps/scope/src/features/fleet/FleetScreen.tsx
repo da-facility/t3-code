@@ -1,12 +1,12 @@
 import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { EnvironmentId } from "@t3tools/contracts";
+import * as Clipboard from "expo-clipboard";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
 import { AsyncResult } from "effect/reactivity";
 import * as Notifications from "expo-notifications";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, RefreshControl, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text, AppTextInput } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
@@ -14,6 +14,9 @@ import * as Dialog from "../../components/ui/Dialog";
 import { GlassSurface } from "../../components/ui/GlassSurface";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { useConnectionController } from "../connection/useConnectionController";
+import { openSettings } from "../settings/settings-navigation";
+import { useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
+import { useSelectWorkspaceTab } from "../workspace/useSelectWorkspaceTab";
 import {
   type FleetServerRow,
   type HubDevice,
@@ -21,7 +24,6 @@ import {
   type HubServer,
   type HubThread,
   normalizeHubUrl,
-  relativeTime,
   summarizeFleet,
 } from "./fleetModel";
 import {
@@ -32,12 +34,11 @@ import {
   loadHubLink,
   useHubLink,
 } from "./hubClient";
-import { registerPushWithHub, sendTestPush } from "./push";
 import { scopeVault } from "./vaultNative";
 
 /**
- * Scope's home: the whole fleet through the hub. Threads open in the T3
- * workspace UI over a direct connection, which the hub sets up on first tap.
+ * The Fleet tab: servers, controllers and the rest of the registry, through the hub. Tapping a
+ * server pairs this phone with it directly and opens it in the Workspace tab.
  */
 export function FleetScreen() {
   const link = useHubLink();
@@ -51,7 +52,6 @@ const defaultHubUrl =
   "";
 
 function HubSetup() {
-  const insets = useSafeAreaInsets();
   const [url, setUrl] = useState(defaultHubUrl);
   const [name, setName] = useState(Device.deviceName ?? "iPhone");
   const [busy, setBusy] = useState(false);
@@ -73,8 +73,9 @@ function HubSetup() {
   return (
     <ScrollView
       className="flex-1 bg-screen"
+      contentInsetAdjustmentBehavior="automatic"
       contentContainerStyle={{
-        paddingTop: insets.top + 48,
+        paddingTop: 24,
         paddingHorizontal: 20,
         paddingBottom: 40,
         gap: 20,
@@ -83,13 +84,13 @@ function HubSetup() {
     >
       <View style={{ gap: 6 }}>
         <Text className="text-4xl font-t3-bold text-foreground">Scope</Text>
-        <Text className="text-base text-muted-foreground">
+        <Text className="text-base text-foreground-muted">
           Connect to your fleet hub over Tailscale. The first phone becomes the owner; later phones
           are approved from an enrolled one.
         </Text>
       </View>
       <GlassSurface style={{ padding: 16, gap: 12 }}>
-        <Text className="text-sm font-t3-medium text-muted-foreground">Hub address</Text>
+        <Text className="text-sm font-t3-medium text-foreground-muted">Hub address</Text>
         <AppTextInput
           className="rounded-xl border border-border px-3 py-3 text-base text-foreground"
           value={url}
@@ -100,14 +101,14 @@ function HubSetup() {
           keyboardType="url"
           accessibilityLabel="Hub address"
         />
-        <Text className="text-sm font-t3-medium text-muted-foreground">This phone's name</Text>
+        <Text className="text-sm font-t3-medium text-foreground-muted">This phone's name</Text>
         <AppTextInput
           className="rounded-xl border border-border px-3 py-3 text-base text-foreground"
           value={name}
           onChangeText={setName}
           accessibilityLabel="Device name"
         />
-        {error ? <Text className="text-sm text-destructive">{error}</Text> : null}
+        {error ? <Text className="text-sm text-danger-foreground">{error}</Text> : null}
         <Button label="Connect to hub" onPress={() => void enroll()} loading={busy} fullWidth />
       </GlassSurface>
     </ScrollView>
@@ -157,13 +158,12 @@ function useFleetData(link: HubLink) {
 }
 
 function FleetDashboard({ link }: { readonly link: HubLink }) {
-  const insets = useSafeAreaInsets();
   const navigation = useNavigation();
+  const workspace = useWorkspaceTabs();
+  const selectTab = useSelectWorkspaceTab();
   const { data, error, refreshing, refresh } = useFleetData(link);
   const { connectedEnvironments, connectPairingUrl } = useConnectionController();
   const [connecting, setConnecting] = useState<string | null>(null);
-  const [pushState, setPushState] = useState<string | null>(null);
-  const now = data?.fetchedAt ?? 0;
 
   const summary = useMemo(
     () => (data ? summarizeFleet(data.servers, data.overviews) : null),
@@ -203,16 +203,16 @@ function FleetDashboard({ link }: { readonly link: HubLink }) {
 
   const openServer = useCallback(
     async (row: FleetServerRow) => {
-      if (await ensureConnected(row)) navigation.navigate("Home" as never);
+      if (await ensureConnected(row)) selectTab("threads");
     },
-    [ensureConnected, navigation],
+    [ensureConnected, selectTab],
   );
 
   useEffect(() => {
     const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data as Record<string, string | undefined>;
       if (data.kind === "credential") {
-        navigation.navigate("Vault" as never);
+        openSettings(navigation, "SettingsVault");
         return;
       }
       const thread =
@@ -226,33 +226,6 @@ function FleetDashboard({ link }: { readonly link: HubLink }) {
     });
     return () => subscription.remove();
   }, [navigation, openThread, summary]);
-
-  const enablePush = () => {
-    void registerPushWithHub(link).then(
-      (result) =>
-        setPushState(
-          result === "registered" ? "Push is on for this phone." : `Push not enabled (${result}).`,
-        ),
-      (cause: unknown) => setPushState(describe(cause)),
-    );
-  };
-
-  const testPush = () => {
-    void sendTestPush(link).then(
-      (result) =>
-        setPushState(result.ok ? "Test push sent." : `Push failed: ${result.reason ?? "unknown"}`),
-      (cause: unknown) => setPushState(describe(cause)),
-    );
-  };
-
-  const disconnect = () =>
-    Dialog.confirm({
-      title: "Disconnect from the hub?",
-      message: "This phone forgets its hub token. Servers stay paired.",
-      confirmText: "Disconnect",
-      destructive: true,
-      onConfirm: () => void forgetHub(),
-    });
 
   if (error?.status === 401 || error?.status === 403) {
     if (data?.device.status !== "pending") {
@@ -279,63 +252,26 @@ function FleetDashboard({ link }: { readonly link: HubLink }) {
   return (
     <ScrollView
       className="flex-1 bg-screen"
+      contentInsetAdjustmentBehavior="automatic"
       contentContainerStyle={{
-        paddingTop: insets.top + 16,
+        paddingTop: 8,
         paddingHorizontal: 16,
-        paddingBottom: insets.bottom + 32,
+        paddingBottom: Math.max(32, workspace?.bottomClearance ?? 0),
         gap: 18,
       }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} />}
     >
-      <View
-        style={{ flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between" }}
-      >
-        <View>
-          <Text className="text-4xl font-t3-bold text-foreground">Fleet</Text>
-          <Text className="text-sm text-muted-foreground">
-            {link.url.replace(/^https?:\/\//, "")}
-          </Text>
-        </View>
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          <Button
-            label="Vault"
-            tone="secondary"
-            onPress={() => navigation.navigate("Vault" as never)}
-          />
-          <Button
-            label="Workspace"
-            tone="secondary"
-            onPress={() => navigation.navigate("Home" as never)}
-          />
-        </View>
-      </View>
-
       {error ? (
         <GlassSurface style={{ padding: 14 }}>
-          <Text className="text-sm text-destructive">{error.message}</Text>
+          <Text className="text-sm text-danger-foreground">{error.message}</Text>
         </GlassSurface>
-      ) : null}
-
-      {summary && summary.attention.length > 0 ? (
-        <Section title="Needs you">
-          {summary.attention.map((thread) => (
-            <ThreadRow
-              key={`${thread.serverId}:${thread.threadId}`}
-              thread={thread}
-              detail={thread.summary}
-              accent
-              now={now}
-              onPress={() => void openThread(thread)}
-            />
-          ))}
-        </Section>
       ) : null}
 
       <Section title="Servers">
         {summary === null ? (
-          <Text className="text-sm text-muted-foreground">Loading…</Text>
+          <Text className="text-sm text-foreground-muted">Loading…</Text>
         ) : summary.servers.length === 0 ? (
-          <Text className="text-sm text-muted-foreground">
+          <Text className="text-sm text-foreground-muted">
             No T3 servers are linked yet. Run scripts/fleet/install with --hub to add one.
           </Text>
         ) : (
@@ -351,22 +287,8 @@ function FleetDashboard({ link }: { readonly link: HubLink }) {
         )}
       </Section>
 
-      {summary && summary.recent.length > 0 ? (
-        <Section title="Recent threads">
-          {summary.recent.map((thread) => (
-            <ThreadRow
-              key={`${thread.serverId}:${thread.threadId}`}
-              thread={thread}
-              detail={thread.status ?? ""}
-              now={now}
-              onPress={() => void openThread(thread)}
-            />
-          ))}
-        </Section>
-      ) : null}
-
       {data ? (
-        <Section title="Devices">
+        <Section title="Controllers">
           {data.devices
             .filter((device) => device.status !== "revoked")
             .map((device) => (
@@ -381,24 +303,21 @@ function FleetDashboard({ link }: { readonly link: HubLink }) {
         </Section>
       ) : null}
 
-      <Section title="This phone">
-        <GlassSurface style={{ padding: 14, gap: 10 }}>
-          <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
-            <Button label="Enable push" tone="secondary" onPress={enablePush} />
-            <Button label="Test push" tone="secondary" onPress={testPush} />
-            <Button label="Disconnect" tone="danger" onPress={disconnect} />
-          </View>
-          {pushState ? <Text className="text-sm text-muted-foreground">{pushState}</Text> : null}
-        </GlassSurface>
-      </Section>
+      {summary && summary.others.length > 0 ? (
+        <Section title="Other servers">
+          {summary.others.map((server) => (
+            <OtherServerRow key={server.id} server={server} />
+          ))}
+        </Section>
+      ) : null}
     </ScrollView>
   );
 }
 
-function Section(props: { readonly title: string; readonly children: React.ReactNode }) {
+export function Section(props: { readonly title: string; readonly children: React.ReactNode }) {
   return (
     <View style={{ gap: 8 }}>
-      <Text className="px-1 text-xs font-t3-bold uppercase tracking-wider text-muted-foreground">
+      <Text className="px-1 text-xs font-t3-bold uppercase tracking-wider text-foreground-muted">
         {props.title}
       </Text>
       <View style={{ gap: 10 }}>{props.children}</View>
@@ -434,17 +353,17 @@ function ServerCard(props: {
           <Text className="flex-1 text-lg font-t3-bold text-foreground" numberOfLines={1}>
             {row.label}
           </Text>
-          <Text className="text-xs text-muted-foreground">
+          <Text className="text-xs text-foreground-muted">
             {props.connecting ? "Connecting…" : props.connected ? "Connected" : "Tap to connect"}
           </Text>
         </View>
-        <Text className="text-sm text-muted-foreground" numberOfLines={1}>
+        <Text className="text-sm text-foreground-muted" numberOfLines={1}>
           {row.server.id} · {row.threads} threads
           {row.running > 0 ? ` · ${row.running} running` : ""}
           {row.waiting > 0 ? ` · ${row.waiting} waiting` : ""}
         </Text>
         {row.health === "error" && row.error ? (
-          <Text className="text-xs text-destructive" numberOfLines={2}>
+          <Text className="text-xs text-danger-foreground" numberOfLines={2}>
             {row.error}
           </Text>
         ) : null}
@@ -453,31 +372,26 @@ function ServerCard(props: {
   );
 }
 
-function ThreadRow(props: {
-  readonly thread: HubThread;
-  readonly detail: string;
-  readonly accent?: boolean;
-  readonly now: number;
-  readonly onPress: () => void;
-}) {
-  const { thread } = props;
+/** A registry server without T3. Tapping copies its SSH command. */
+function OtherServerRow(props: { readonly server: HubServer }) {
+  const { server } = props;
   return (
-    <Pressable onPress={props.onPress} accessibilityRole="button">
+    <Pressable
+      onPress={() => void Clipboard.setStringAsync(`ssh ${server.ssh}`)}
+      accessibilityRole="button"
+      accessibilityLabel={`Copy the SSH command for ${server.id}`}
+    >
       <GlassSurface style={{ paddingVertical: 12, paddingHorizontal: 14, gap: 4 }}>
-        <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-          {props.accent ? (
-            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#FFB23E" }} />
-          ) : null}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <Text className="flex-1 text-base font-t3-medium text-foreground" numberOfLines={1}>
-            {thread.title ?? "Untitled thread"}
+            {server.id}
           </Text>
-          <Text className="text-xs text-muted-foreground">
-            {relativeTime(thread.updatedAt, props.now)}
-          </Text>
+          {server.serviceCount > 0 ? (
+            <Text className="text-xs text-foreground-muted">{server.serviceCount} services</Text>
+          ) : null}
         </View>
-        <Text className="text-sm text-muted-foreground" numberOfLines={1}>
-          {thread.serverId}
-          {thread.projectTitle ? ` · ${thread.projectTitle}` : ""} · {props.detail}
+        <Text className="text-sm text-foreground-muted" numberOfLines={1}>
+          ssh {server.ssh}
         </Text>
       </GlassSurface>
     </Pressable>
@@ -509,7 +423,7 @@ function DeviceRow(props: {
           {device.name}
           {props.self ? " (this phone)" : ""}
         </Text>
-        <Text className="text-xs text-muted-foreground">
+        <Text className="text-xs text-foreground-muted">
           {device.role}
           {device.status === "pending" ? " · pending" : ""}
           {device.hasPush ? " · push" : ""}
@@ -537,7 +451,7 @@ function CenteredMessage(props: {
     <View className="flex-1 bg-screen" style={{ justifyContent: "center", padding: 24 }}>
       <GlassSurface style={{ padding: 20, gap: 14 }}>
         <Text className="text-2xl font-t3-bold text-foreground">{props.title}</Text>
-        <Text className="text-base text-muted-foreground">{props.body}</Text>
+        <Text className="text-base text-foreground-muted">{props.body}</Text>
         <Button label={props.action.label} onPress={props.action.onPress} fullWidth />
         {props.secondary ? (
           <Button

@@ -16,10 +16,11 @@ import { resolveWorkspaceTabOrder } from "./workspace-tabs-state";
 
 export const WORKSPACE_TAB_LABELS = {
   ...NAVIGATION_TAB_LABELS,
-  ...(Platform.OS === "ios" ? { threads: "Chats", pullRequests: "PRs" } : {}),
+  ...(Platform.OS === "ios" ? { pullRequests: "PRs" } : {}),
 };
 
 export const NAVIGATION_TAB_ICONS = {
+  fleet: "server.rack",
   threads: "text.bubble",
   pullRequests: PullRequestGlyph.pullRequest,
   usage: "chart.bar.xaxis",
@@ -33,13 +34,19 @@ export function useNavigationTabOrder() {
   return useMemo(() => resolveWorkspaceTabOrder(saved), [saved]);
 }
 
+// Scope's tab bar is Fleet, Workspace and Settings.
+const SCOPE_HIDDEN_TABS: readonly NavigationTab[] = ["pullRequests", "usage"];
+
 export function useHiddenNavigationTabs() {
   const preferences = useAtomValue(mobilePreferencesAtom);
   const saved = AsyncResult.isSuccess(preferences)
     ? preferences.value.hiddenNavigationTabs
     : undefined;
   return useMemo(
-    () => (navigationCustomizationAvailable() ? resolveHiddenNavigationTabs(saved) : []),
+    () =>
+      navigationCustomizationAvailable()
+        ? [...new Set([...resolveHiddenNavigationTabs(saved), ...SCOPE_HIDDEN_TABS])]
+        : SCOPE_HIDDEN_TABS,
     [saved],
   );
 }

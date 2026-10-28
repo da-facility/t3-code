@@ -36,7 +36,7 @@ export function VaultScreen() {
   if (!link) {
     return (
       <View className="flex-1 bg-screen" style={{ justifyContent: "center", padding: 24 }}>
-        <Text className="text-base text-muted-foreground">Connect to a hub first.</Text>
+        <Text className="text-base text-foreground-muted">Connect to a hub first.</Text>
       </View>
     );
   }
@@ -149,7 +149,7 @@ function VaultApproval({ link }: { readonly link: HubLink }) {
           </Text>
         </View>
         {status && !status.configured ? (
-          <Text className="text-sm text-muted-foreground">
+          <Text className="text-sm text-foreground-muted">
             Run `fleet-hub vault setup` on the hub after registering this phone's key.
           </Text>
         ) : null}
@@ -178,11 +178,11 @@ function VaultApproval({ link }: { readonly link: HubLink }) {
           />
         ) : null}
         {status?.rotationPending ? (
-          <Text className="text-xs text-muted-foreground">
+          <Text className="text-xs text-foreground-muted">
             The vault key rotates at the next unlock (a phone was revoked).
           </Text>
         ) : null}
-        {message ? <Text className="text-sm text-muted-foreground">{message}</Text> : null}
+        {message ? <Text className="text-sm text-foreground-muted">{message}</Text> : null}
       </GlassSurface>
 
       {requests.map((request) => (
@@ -190,11 +190,11 @@ function VaultApproval({ link }: { readonly link: HubLink }) {
           <Text className="text-lg font-t3-bold text-foreground">
             Sign in to {host(request.url)}?
           </Text>
-          <Text className="text-sm text-muted-foreground">Requested by {request.requester}</Text>
+          <Text className="text-sm text-foreground-muted">Requested by {request.requester}</Text>
           {!status?.unlockedByThisDevice ? (
-            <Text className="text-sm text-muted-foreground">Unlock to choose a login.</Text>
+            <Text className="text-sm text-foreground-muted">Unlock to choose a login.</Text>
           ) : request.options.length === 0 ? (
-            <Text className="text-sm text-muted-foreground">
+            <Text className="text-sm text-foreground-muted">
               No 1Password login matches this site.
             </Text>
           ) : (

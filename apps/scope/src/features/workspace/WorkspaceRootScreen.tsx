@@ -168,7 +168,8 @@ function WorkspaceRootContent() {
               // Beside a detail column the tab bar names the tab and the detail header the page,
               // so the sidebar keeps the brand.
               headerTitle:
-                sidebarNavigation || (!settingsOpen && state.selectedTab !== "usage")
+                sidebarNavigation ||
+                (!settingsOpen && state.selectedTab !== "usage" && state.selectedTab !== "fleet")
                   ? renderHeaderTitle
                   : undefined,
             }}
