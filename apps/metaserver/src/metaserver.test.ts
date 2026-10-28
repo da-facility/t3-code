@@ -166,6 +166,16 @@ describe("t3 metaserver", () => {
       process.umask(previous);
     }
     expect(NodeFS.statSync(caddyFile).mode & 0o777).toBe(0o644);
+
+    // A file an older build left unreadable is fixed even when its content is current.
+    NodeFS.chmodSync(caddyFile, 0o600);
+    await syncRelay(metaserver.db, {
+      publicHost: "metaserver.example.ts.net",
+      portBase: 9001,
+      caddyFile,
+      reloadCommand: "true",
+    });
+    expect(NodeFS.statSync(caddyFile).mode & 0o777).toBe(0o644);
   });
 
   it("writes one Caddy site per linked server and reloads only on change", async () => {

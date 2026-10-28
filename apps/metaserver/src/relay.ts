@@ -70,7 +70,11 @@ export async function syncRelay(
     const current = NodeFS.existsSync(config.caddyFile)
       ? NodeFS.readFileSync(config.caddyFile, "utf8")
       : null;
-    if (current === content) return { changed, error: null };
+    if (current === content) {
+      if ((NodeFS.statSync(config.caddyFile).mode & 0o777) !== 0o644)
+        NodeFS.chmodSync(config.caddyFile, 0o644);
+      return { changed, error: null };
+    }
     const temporary = NodePath.join(
       NodePath.dirname(config.caddyFile),
       `.${NodePath.basename(config.caddyFile)}.tmp`,
